@@ -139,3 +139,12 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .cart-row .cart-remove+.order-line{padding-left:5px}
 .order-edit-actions{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;margin-top:8px}
 .order-edit-actions .pay-button{margin:0}
+
+.pos-pagination{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;min-height:48px;padding:9px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+.pos-page-size,.pos-page-buttons{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.pos-page-size select{border:1px solid var(--border);border-radius:6px;background:#fff;padding:5px 6px;color:var(--ink)}
+.pos-page-size select:focus-visible{outline:2px solid var(--plum)}
+.pos-page-buttons{margin-left:auto}
+.pos-page-buttons button{font-size:12px;padding:6px 9px}
+.pos-page-range,.pos-page-buttons span{font-variant-numeric:tabular-nums}
+@media(max-width:500px){.pos-page-buttons{margin-left:0}.pos-pagination{justify-content:space-between}}
