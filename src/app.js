@@ -123,8 +123,17 @@ const app = Vue.createApp({
    },
    displayedTotal(){return this.viewedOrder?.total_minor ?? this.total;}
  },
- mounted(){void this.restoreSession();window.addEventListener('keydown',this.keyboard);},
- beforeUnmount(){window.removeEventListener('keydown',this.keyboard);},
+ mounted(){
+   void this.restoreSession();
+   window.addEventListener('keydown',this.keyboard);
+   document.addEventListener('pointerdown',this.closeOutsideHeader);
+   document.addEventListener('focusin',this.closeOutsideHeader);
+ },
+ beforeUnmount(){
+   window.removeEventListener('keydown',this.keyboard);
+   document.removeEventListener('pointerdown',this.closeOutsideHeader);
+   document.removeEventListener('focusin',this.closeOutsideHeader);
+ },
  methods:{
    art,
    async restoreSession(){
@@ -394,7 +403,19 @@ const app = Vue.createApp({
    },
    openDialog(name){this.orderSaveError='';this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
    closeDialog(){if(this.orderSaving)return;document.getElementById('dialog')?.close();},
+   closeOutsideHeader(event){
+     if(this.menu&&!event.target.closest?.('[data-header-popover="menu"]'))this.menu=false;
+     if(this.profile&&!event.target.closest?.('[data-header-popover="profile"]'))this.profile=false;
+   },
    keyboard(e){
+     if(e.key==='Escape'&&(this.menu||this.profile)){
+       const trigger=document.querySelector('[data-header-popover="'+(this.menu?'menu':'profile')+'"] > button');
+       this.menu=false;this.profile=false;
+       trigger?.focus();
+       e.preventDefault();
+       return;
+     }
+     if(e.target?.closest?.('[data-header-popover] .pos-dropdown'))return;
      if(!this.user||this.page!=='register'||this.viewedOrder||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||this.dialogName||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;
      if(e.key==='/'){e.preventDefault();document.getElementById('search')?.focus();}
      else if(this.activeLine && /^[0-9.]$/.test(e.key)){e.preventDefault();this.press(e.key);}

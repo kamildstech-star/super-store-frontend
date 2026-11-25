@@ -31,26 +31,28 @@
     <button v-for="item in pages" :key="item.id" class="pos-nav-button" type="button"
       :title="item.label" :aria-label="item.label" :aria-current="page===item.id?'page':undefined"
       :disabled="managementBusy || ordersBusy" @click="goPage(item.id)">
-      <pos-icon :name="item.id"></pos-icon><span v-if="item.id!=='register'">{{item.label}}</span>
+      <pos-icon :name="item.id"></pos-icon>
     </button>
   </nav>
   <div class="top-actions">
     <button v-if="page==='register' && !viewedOrder" class="new-order" @click="newOrder" aria-label="New order" title="New order"><pos-icon name="add"></pos-icon></button>
-    <div v-if="page==='register' && !viewedOrder" class="menu-wrap">
-      <button class="icon-button" aria-label="Register menu" :aria-expanded="menu" @click="menu=!menu; profile=false"><pos-icon name="menu"></pos-icon></button>
-      <div v-if="menu" class="menu-panel">
-        <button @click="loadSample" :disabled="catalogState!=='ready'">Load sample order</button>
-        <button @click="newOrder">New empty order</button>
-        <button @click="openDialog('help')">Keyboard shortcuts</button>
+    <div v-if="page==='register' && !viewedOrder" class="menu-wrap" data-header-popover="menu">
+      <button class="icon-button" type="button" aria-label="Register menu" title="Register menu" aria-controls="register-dropdown" :aria-expanded="menu" @click="menu=!menu; profile=false"><pos-icon name="menu"></pos-icon></button>
+      <div id="register-dropdown" v-show="menu" class="menu-panel pos-dropdown" role="group" aria-label="Register shortcuts">
+        <span class="pos-dropdown-label">Register shortcuts</span>
+        <button type="button" @click="loadSample" :disabled="catalogState!=='ready'"><pos-icon name="orders"></pos-icon> Load sample order</button>
+        <button type="button" @click="newOrder"><pos-icon name="add"></pos-icon> New empty order</button>
+        <button type="button" @click="openDialog('help')"><pos-icon name="register"></pos-icon> Keyboard shortcuts</button>
       </div>
     </div>
-    <div class="menu-wrap">
-      <button class="avatar profile-toggle" aria-label="Profile" title="Profile" :aria-expanded="profile" @click="profile=!profile; menu=false"><pos-icon name="user"></pos-icon></button>
-      <div v-if="profile" class="menu-panel profile-menu">
+    <div class="menu-wrap" data-header-popover="profile">
+      <button class="avatar profile-toggle" type="button" aria-controls="profile-dropdown" aria-label="Profile" title="Profile" :aria-expanded="profile" @click="profile=!profile; menu=false"><pos-icon name="user"></pos-icon></button>
+      <div id="profile-dropdown" v-show="profile" class="menu-panel pos-dropdown profile-menu" role="group" aria-label="Signed-in profile">
+        <span class="pos-dropdown-label">Signed in as</span>
         <span class="profile-details"><strong>{{user.name}}</strong><small>{{user.email}}</small></span>
       </div>
     </div>
-    <button class="pos-nav-button pos-logout" type="button" @click="logout" :disabled="authBusy"><pos-icon name="logout"></pos-icon> <span>Log out</span></button>
+    <button class="pos-nav-button pos-logout" type="button" aria-label="Log out" title="Log out" @click="logout" :disabled="authBusy"><pos-icon name="logout"></pos-icon></button>
   </div>
 </header>
 <p v-if="user && authError" class="mg-error" role="alert">{{authError}}</p>
@@ -223,10 +225,13 @@
     <div class="mg-field-grid">
       <label v-for="field in manage.fields.filter(f=>!f.creationOnly||!managementForm.id)" :key="field.key" class="mg-field">
         <span>{{field.label}}</span>
-        <select v-if="field.options" v-model="managementForm[field.key]" :required="!field.optional">
-          <option value="" :disabled="!field.optional">{{field.optional ? 'None' : 'Choose…'}}</option>
-          <option v-for="opt in managementData[field.options]" :key="opt.id" :value="opt.id">{{opt.name}}</option>
-        </select>
+        <span v-if="field.options" class="pos-select">
+          <select v-model="managementForm[field.key]" :required="!field.optional">
+            <option value="" :disabled="!field.optional">{{field.optional ? 'None' : 'Choose…'}}</option>
+            <option v-for="opt in managementData[field.options]" :key="opt.id" :value="opt.id">{{opt.name}}</option>
+          </select>
+          <pos-icon name="back"></pos-icon>
+        </span>
         <input v-else-if="field.type==='checkbox'" type="checkbox" v-model="managementForm[field.key]">
         <input v-else v-model="managementForm[field.key]" :data-start-focus="field.key==='name'?'':undefined" :type="field.type||'text'" :min="field.min" :max="field.max" :step="field.step"
          :required="field.code ? Boolean(managementForm.id) : !field.optional && field.key!=='barcode'"

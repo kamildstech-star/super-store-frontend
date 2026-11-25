@@ -1,6 +1,6 @@
 # Super Store POS Frontend
 
-Odoo-inspired Vue 3 + Tailwind POS. The first page is **Login**; public sign-up is not available. Once signed in, the top bar shows page icons, your profile and a separate **Log out** button. The monitor icon returns to the register.
+Odoo-inspired Vue 3 + Tailwind POS. The first page is **Login**; public sign-up is not available. Once signed in, the top bar uses compact, borderless icons with tooltips for pages, profile and **Log out**. Register shortcuts and profile open in dropdown panels; press Escape or click outside to close them. The monitor icon returns to the register.
 
 ## Run
 
