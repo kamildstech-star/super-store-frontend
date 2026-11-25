@@ -12,18 +12,45 @@
 </head>
 <body>
 <div id="app" v-cloak>
-<header class="topbar flex items-center justify-between">
+<main v-if="!user" class="auth-screen">
+  <section class="auth-card" aria-labelledby="auth-title">
+    <span class="wordmark">odoo</span>
+    <div><span class="eyebrow">SUPER STORE · POINT OF SALE</span><h1 id="auth-title">Sign in</h1></div>
+    <p v-if="authState==='loading'" role="status">Checking your session…</p>
+    <p v-if="authError" class="mg-error" role="alert">{{authError}}</p>
+    <button v-if="authState==='unavailable'" type="button" class="primary" @click="restoreSession">Retry connection</button>
+    <form v-if="authState==='guest'" @submit.prevent="login">
+      <label class="mg-field"><span>Email</span><input type="email" autocomplete="username" v-model="loginForm.email" required maxlength="254"></label>
+      <label class="mg-field"><span>Password</span><input type="password" autocomplete="current-password" v-model="loginForm.password" required maxlength="72"></label>
+      <button class="primary" type="submit" :disabled="authBusy">{{authBusy ? 'Signing in…' : 'Log in'}}</button>
+    </form>
+  </section>
+</main>
+<header v-if="user" class="topbar flex items-center justify-between">
   <div class="flex items-center top-left">
     <span class="wordmark" aria-label="Odoo-style demo">odoo</span>
     <span class="divider"></span>
-    <span class="register-tab"><svg-icon name="register"></svg-icon> Register</span>
-    <button class="new-order" @click="newOrder" aria-label="New order" title="New order">+</button>
+    <button class="register-tab" @click="goPage('register')" :aria-current="page==='register'?'page':undefined" :disabled="managementBusy"><svg-icon name="register"></svg-icon> Register</button>
+    <div class="menu-wrap">
+      <button class="management-toggle" :class="{ 'management-active': manage }" :aria-expanded="managementMenu" @click="managementMenu=!managementMenu; profile=false" :disabled="managementBusy"><svg-icon name="grid"></svg-icon> Management <span aria-hidden="true">▾</span></button>
+      <div v-if="managementMenu" class="menu-panel management-menu" aria-label="Management pages">
+        <button v-for="(item,key) in manager" :key="key" @click="goPage(key)" :aria-current="page===key?'page':undefined">{{item.title}}</button>
+      </div>
+    </div>
+    <button v-if="page==='register'" class="new-order" @click="newOrder" aria-label="New order" title="New order">+</button>
   </div>
   <div class="flex items-center top-right">
     <span class="demo-label"><span></span> DEMO MODE</span>
-    <span class="cashier"><span class="avatar">MC</span><span class="cashier-name">Main Counter</span></span>
     <div class="menu-wrap">
-      <button class="icon-button menu-button" aria-label="Register menu" :aria-expanded="menu" @click="menu=!menu"><svg-icon name="menu"></svg-icon></button>
+      <button class="avatar profile-toggle" aria-label="Profile" :aria-expanded="profile" @click="profile=!profile; managementMenu=false"><svg-icon name="user"></svg-icon></button>
+      <div v-if="profile" class="menu-panel profile-menu">
+        <span class="profile-details"><strong>{{user.name}}</strong><small>{{user.email}}</small></span>
+        <small v-if="authError" class="mg-error" role="alert">{{authError}}</small>
+        <button @click="logout" :disabled="authBusy">Log out</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button v-if="page==='register'" class="icon-button menu-button" aria-label="Register menu" :aria-expanded="menu" @click="menu=!menu"><svg-icon name="menu"></svg-icon></button>
       <div v-if="menu" class="menu-panel">
         <button @click="loadSample" :disabled="catalogState!=='ready'">Load sample order</button>
         <button @click="newOrder">New empty order</button>
@@ -33,7 +60,67 @@
   </div>
 </header>
 
-<main class="workspace" :class="{ 'show-order': mobile==='order' }">
+<main v-if="user && manage" class="management-page">
+  <div class="mg-page-head">
+    <div><span class="eyebrow">POINT OF SALE / MANAGEMENT</span><h1>{{manage.title}}</h1></div>
+    <button class="primary" type="button" @click="managementStart()" :disabled="managementBusy">New {{manage.single}}</button>
+  </div>
+  <div class="mg-error" role="alert" v-if="managementError">{{managementError}}</div>
+  <div class="mg-notice" role="status" v-if="managementNotice">{{managementNotice}}</div>
+  <form class="mg-form" v-if="managementForm" @submit.prevent="managementSave">
+    <h2>{{managementForm.id ? 'Edit' : 'New'}} {{manage.single}}</h2>
+    <div class="mg-field-grid">
+      <label v-for="field in manage.fields.filter(f=>!f.creationOnly||!managementForm.id)" :key="field.key" class="mg-field">
+        <span>{{field.label}}</span>
+        <select v-if="field.options" v-model="managementForm[field.key]" :required="!field.optional">
+          <option value="" :disabled="!field.optional">{{field.optional ? 'None' : 'Choose…'}}</option>
+          <option v-for="opt in managementData[field.options]" :key="opt.id" :value="opt.id">{{opt.name}}</option>
+        </select>
+        <input v-else-if="field.type==='checkbox'" type="checkbox" v-model="managementForm[field.key]">
+        <input v-else v-model="managementForm[field.key]" :type="field.type||'text'" :min="field.min" :max="field.max" :step="field.step"
+         :required="field.code ? Boolean(managementForm.id) : !field.optional && field.key!=='barcode'"
+         :inputmode="field.code?'numeric':undefined" :maxlength="field.code?4:undefined"
+         :pattern="field.code?'[0-9]{4}':field.keyFormat?'[a-z0-9]+(?:-[a-z0-9]+)*':undefined"
+         :placeholder="field.code&&!managementForm.id?'Leave blank to generate':undefined">
+        <small v-if="field.code && !managementForm.id">Leave blank and Laravel assigns an unused 4-digit code.</small>
+      </label>
+    </div>
+    <div class="mg-actions">
+      <button class="primary" type="submit" :disabled="managementBusy">Save</button>
+      <button class="secondary" type="button" @click="managementForm=null; managementError=''" :disabled="managementBusy">Cancel</button>
+    </div>
+  </form>
+  <div v-if="managementDelete" class="mg-confirm" role="alert">
+    <strong>{{page==='products' ? 'Archive' : 'Delete'}} {{managementDelete.name}}?</strong>
+    <p>{{page==='products' ? 'This removes the product from the sale screen. You can restore it by editing the product.' : 'This cannot be undone.'}}</p>
+    <div class="mg-actions">
+      <button class="danger" @click="managementRemove" :disabled="managementBusy">{{page==='products'?'Archive':'Delete'}}</button>
+      <button class="secondary" @click="managementDelete=null" :disabled="managementBusy">Cancel</button>
+    </div>
+  </div>
+  <section class="mg-list" aria-label="Management records">
+    <div class="mg-list-tools"><input v-model="managementSearch" type="search" :aria-label="'Search '+manage.title" :placeholder="'Search '+manage.title.toLowerCase()+'…'"></div>
+    <div class="mg-table-wrap">
+      <table class="mg-table">
+        <thead><tr><th v-for="col in manage.columns" :key="col" scope="col">{{col}}</th><th scope="col">Actions</th></tr></thead>
+        <tbody>
+          <tr v-for="row in manageRows" :key="row.id">
+            <td v-for="(value,index) in rowValues(row)" :key="index">{{value}}</td>
+            <td class="mg-row-tools">
+              <button class="secondary" @click="managementStart(row)" :disabled="managementBusy" :aria-label="'Edit '+row.name">Edit</button>
+              <button v-if="page!=='products'||row.is_active" class="secondary" :disabled="managementBusy"
+               @click="managementDelete=row; managementForm=null; managementError=''; managementNotice=''"
+               :aria-label="(page==='products'?'Archive ':'Delete ')+row.name">{{page==='products'?'Archive':'Delete'}}</button>
+            </td>
+          </tr>
+          <tr v-if="!manageRows.length"><td :colspan="manage.columns.length+1">{{managementBusy ? 'Loading records…' : 'No matching records.'}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<main v-if="user && page==='register'" class="workspace" :class="{ 'show-order': mobile==='order' }">
   <section class="order-panel" aria-label="Current order">
     <div class="order-head flex items-center justify-between">
       <div><span class="eyebrow">CURRENT ORDER</span><h1>Order #{{ orderNumber }}</h1></div>
@@ -73,8 +160,10 @@
   <section class="catalog" aria-label="Product catalog">
     <div class="catalog-tools">
       <div class="search-row flex items-center">
-        <label for="search" class="search-box flex items-center"><svg-icon name="search"></svg-icon><input id="search" type="search" placeholder="Search products…" v-model="query" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch">×</button></label>
+        <label for="search" class="search-box flex items-center"><svg-icon name="search"></svg-icon><input id="search" type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()">×</button></label>
+        <button type="button" class="secondary scan-focus" @click="clearSearch()" title="Focus the search box, then scan with an Enter-suffix scanner">Scan barcode</button>
       </div>
+      <small v-if="searchStatus" class="scan-status" role="status">{{searchStatus}}</small>
       <div class="category-row" aria-label="Product categories">
         <button v-for="c in categories" :key="c.id" class="category" :class="{ 'category-active':category===c.id }" :style="{ '--cat':c.color }" :aria-pressed="category===c.id" @click="category=c.id">
           <svg-icon :name="c.icon"></svg-icon> {{ c.name }}
@@ -92,7 +181,7 @@
             <span class="product-illustration" v-html="art(p)"></span>
             <span v-if="inCart(p.id)" class="in-cart" :aria-label="quantity(inCart(p.id))+' in order'">{{ quantity(inCart(p.id)) }}</span>
           </div>
-          <div class="product-meta"><strong>{{ p.name }}</strong><span>{{ money(p.price) }} <small>/ {{ p.unit }}</small></span></div>
+          <div class="product-meta"><strong>{{ p.name }}</strong><span>{{ money(p.price) }} <small>/ {{ p.unit }}<template v-if="p.code"> · {{p.code}}</template></small></span></div>
         </button>
       </div>
       <div v-else class="no-results">
@@ -103,7 +192,7 @@
   </section>
 </main>
 
-<nav class="mobile-nav" aria-label="Mobile register views">
+<nav v-if="user && page==='register'" class="mobile-nav" aria-label="Mobile register views">
   <button :class="{active:mobile==='catalog'}" @click="mobile='catalog'"><svg-icon name="grid"></svg-icon> Products</button>
   <button :class="{active:mobile==='order'}" @click="mobile='order'"><svg-icon name="basket"></svg-icon> Order · {{ money(total) }}</button>
 </nav>

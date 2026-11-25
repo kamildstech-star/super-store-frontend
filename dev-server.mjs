@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, request } from 'node:http';
 
 const host = '127.0.0.1';
 const port = 4173;
@@ -11,7 +11,28 @@ const files = new Map([
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
 ]);
 
+// Forward only POS routes to a loopback Laravel server so session cookies and CSRF stay same-origin.
+function proxyPos(req, res) {
+  const {connection, 'proxy-connection': proxyConnection, ...headers} = req.headers;
+  const backend = request({
+    hostname: '127.0.0.1', port: 8000, path: req.url, method: req.method,
+    headers, timeout: 10000,
+  }, (response) => {
+    res.writeHead(response.statusCode, response.headers);
+    response.pipe(res);
+  });
+  backend.on('timeout', () => backend.destroy(new Error('Laravel timed out')));
+  backend.on('error', () => {
+    if (res.headersSent) return res.destroy();
+    res.writeHead(502, {'Content-Type':'application/json'})
+      .end(JSON.stringify({message:'Could not reach Laravel at http://127.0.0.1:8000.'}));
+  });
+  req.on('aborted', () => backend.destroy());
+  req.pipe(backend);
+}
+
 const server = createServer(async (req, res) => {
+  if (req.url.startsWith('/api/pos/')) return proxyPos(req, res);
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { Allow: 'GET, HEAD' }).end();
     return;

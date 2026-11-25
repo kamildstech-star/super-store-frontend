@@ -33,6 +33,7 @@ function normalizeCatalog(data) {
         !Number.isSafeInteger(p.price_minor) || p.price_minor<0) throw new Error('The catalog contains an invalid product.');
      const art=p.art??{};
      return {id:p.sku,name:p.name,category:p.category,unit:p.unit,precision:unit.quantity_precision,price:p.price_minor,
+       code:typeof p.internal_code==='string'?p.internal_code:'', barcode:typeof p.barcode==='string'?p.barcode:'',
        shape:allowedShapes.has(art.shape)?art.shape:'box',ink:safeColor(art.ink,'#87657f'),
        tone:safeColor(art.tone,'#f4edf3'),label:typeof art.label==='string' && /^[A-Z0-9 ]{0,12}$/.test(art.label)?art.label:''};
    })
@@ -58,37 +59,196 @@ function art({shape,ink:c,label:l}) {
 
 const format = new Intl.NumberFormat('en-PK',{minimumFractionDigits:2,maximumFractionDigits:2});
 const createLine = (p,qty=1)=>({...p,qty,discount:0});
+const manager = {
+ products:{title:'Products',single:'Product',columns:['Internal code','Name','Barcode','Price','Status'],
+   fields:[
+     {key:'name',label:'Name'},
+     {key:'internal_code',label:'Internal code (4 digits)',code:true},
+     {key:'barcode',label:'Barcode (optional)'},
+     {key:'price',label:'Price (PKR)',type:'number',min:0,max:999999.99,step:0.01},
+     {key:'category_id',label:'Category',options:'categories'},
+     {key:'unit_id',label:'Unit',options:'units'},
+     {key:'supplier_id',label:'Supplier (optional)',options:'suppliers',optional:true},
+     {key:'is_active',label:'Available in POS',type:'checkbox'},
+   ]},
+ categories:{title:'Categories',single:'Category',columns:['Name','Key'],fields:[
+   {key:'name',label:'Name'},{key:'slug',label:'Category key (e.g. frozen-food)',creationOnly:true,keyFormat:true}]},
+ units:{title:'Units',single:'Unit',columns:['Name','Code','Decimal places'],fields:[
+   {key:'name',label:'Name'},{key:'code',label:'Unit code (e.g. kg)',creationOnly:true,keyFormat:true},
+   {key:'quantity_precision',label:'Decimal places',type:'number',min:0,max:3,step:1}]},
+ suppliers:{title:'Suppliers',single:'Supplier',columns:['Name','Email','Phone'],fields:[
+   {key:'name',label:'Name'},{key:'email',label:'Email (optional)',type:'email',optional:true},
+   {key:'phone',label:'Phone (optional)',type:'tel',optional:true}]},
+};
+const emptyManagement = () => ({products:[],categories:[],units:[],suppliers:[]});
+
+async function posRequest(path,{method='GET',body,csrf}={}) {
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),12000);
+ try {
+   const headers={Accept:'application/json'};
+   if(body!==undefined)headers['Content-Type']='application/json';
+   if(csrf)headers['X-CSRF-TOKEN']=csrf;
+   const response=await fetch(posApiBaseUrl+path,{method,headers,credentials:'include',
+     body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});
+   if(response.status===204)return null;
+   const data=await response.json().catch(()=>null);
+   if(!response.ok){
+     const message=Object.values(data?.errors??{}).flat().join(' ')||data?.message||'The POS API returned '+response.status+'.';
+     const err=new Error(response.status===419?'Your session expired. Reload and sign in again.':message);
+     err.status=response.status;
+     throw err;
+   }
+   if(data===null)throw new Error('The POS backend did not return JSON.');
+   return data;
+ } catch (err) {
+   if(err instanceof TypeError||err.name==='AbortError')throw new Error('Could not reach Laravel. Check that the backend is running.');
+   throw err;
+ } finally {clearTimeout(timer);}
+}
+
 const dialogs = {clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Payment preview',help:'Keyboard shortcuts'};
 const app = Vue.createApp({
  render: registerRender,
- data:()=>({categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
+ data:()=>({page:'register',manager,managementMenu:false,profile:false,managementData:emptyManagement(),
+   managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,managementSearch:'',
+   user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
+   searchStatus:'',sampleInitialized:false,categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
-   categoryName(){return this.categories.find(c=>c.id===this.category).name;},
-   filtered(){const q=this.query.trim().toLowerCase();return this.catalog.filter(p=>(this.category==='all'||p.category===this.category)&&(!q||[p.name,p.id,p.unit].some(s=>s.toLowerCase().includes(q))));},
+   categoryName(){return this.categories.find(c=>c.id===this.category)?.name??'All products';},
+   manage(){return this.manager[this.page];},
+   manageRows(){const q=this.managementSearch.trim().toLowerCase();return (this.managementData[this.page]??[]).filter(row=>!q||this.rowValues(row).some(v=>String(v??'').toLowerCase().includes(q)));},
+   initials(){return this.user?.name.trim().split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase()||'U';},
+   filtered(){const q=this.query.trim().toLowerCase();return this.catalog.filter(p=>(this.category==='all'||p.category===this.category)&&(!q||[p.name,p.id,p.unit,p.code,p.barcode].some(s=>s.toLowerCase().includes(q))));},
    activeLine(){return this.lines.find(l=>l.id===this.selected);},
    total(){return this.lines.reduce((sum,l)=>sum+this.lineTotal(l),0);}
  },
- mounted(){void this.loadCatalog();window.addEventListener('keydown',this.keyboard);},
+ mounted(){void this.restoreSession();window.addEventListener('keydown',this.keyboard);},
  beforeUnmount(){window.removeEventListener('keydown',this.keyboard);},
  methods:{
    art,
+   async restoreSession(){
+     this.authState='loading';this.authError='';
+     try{
+       const data=await posRequest('/api/pos/auth/session');
+       this.csrf=data.csrf_token;
+       this.user=data.user;
+       this.authState=this.user?'ready':'guest';
+       if(this.user)await this.loadCatalog();
+     }catch(err){this.authState='unavailable';this.authError=err.message;}
+   },
+   async login(){
+     this.authBusy=true;this.authError='';
+     try{
+       const data=await posRequest('/api/pos/auth/login',{method:'POST',csrf:this.csrf,body:this.loginForm});
+       this.user=data.user;this.csrf=data.csrf_token;this.authState='ready';
+       this.loginForm={email:'',password:''};
+       await this.loadCatalog();
+     }catch(err){
+       this.loginForm.password='';
+       this.authError=err.message;
+       if(err.status===419){await this.restoreSession();this.authError=err.message;}
+     }finally{this.authBusy=false;}
+   },
+   async logout(){
+     this.authBusy=true;this.authError='';
+     try{
+       const data=await posRequest('/api/pos/auth/logout',{method:'POST',csrf:this.csrf});
+       this.csrf=data.csrf_token;
+       this.resetAuth();
+     }catch(err){if(err.status===401||err.status===419){this.resetAuth();await this.restoreSession();}else this.authError=err.message;}
+     finally{this.authBusy=false;}
+   },
+   resetAuth(){
+     this.user=null;this.authState='guest';this.profile=false;this.managementMenu=false;this.menu=false;
+     this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
+     this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';this.searchStatus='';
+     this.clearOrder();this.sampleInitialized=false;this.orderNumber='001';
+   },
+   async expireSession(err){
+     if(err.status!==401&&err.status!==419)return false;
+     this.resetAuth();await this.restoreSession();
+     if(!this.user)this.authError='Your session ended. Sign in again.';
+     return true;
+   },
+   async goPage(page){
+     this.page=page;this.managementMenu=false;this.menu=false;this.profile=false;
+     this.managementForm=null;this.managementDelete=null;this.managementError='';this.managementNotice='';
+     this.managementSearch='';
+     if(page==='register'){await this.loadCatalog();return;}
+     await this.refreshManagement();
+   },
+   async refreshManagement(){
+     this.managementBusy=true;this.managementError='';
+     try{this.managementData=await posRequest('/api/pos/management');}
+     catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
+     finally{this.managementBusy=false;}
+   },
+   managementStart(row=null){
+     this.managementError='';this.managementNotice='';this.managementDelete=null;
+     this.managementForm=row?{...row,price:row.price_minor===undefined?'':(row.price_minor/100).toFixed(2)}:
+       {name:'',internal_code:'',barcode:'',price:'',category_id:'',unit_id:'',supplier_id:'',
+        is_active:true,slug:'',code:'',quantity_precision:0,email:'',phone:''};
+   },
+   async managementSave(){
+     const form=this.managementForm;
+     if(!form||this.managementBusy)return;
+     this.managementBusy=true;this.managementError='';this.managementNotice='';
+     const resource=this.page;
+     const body={name:form.name.trim()};
+     if(resource==='products')Object.assign(body,{
+       internal_code:form.internal_code?.trim()||null,barcode:form.barcode?.trim()||null,
+       price_minor:Math.round(Number(form.price)*100),category_id:Number(form.category_id),unit_id:Number(form.unit_id),
+       supplier_id:form.supplier_id?Number(form.supplier_id):null,is_active:Boolean(form.is_active),
+     });
+     if(resource==='categories'&&!form.id)body.slug=form.slug.trim().toLowerCase();
+     if(resource==='units'){body.quantity_precision=Number(form.quantity_precision);if(!form.id)body.code=form.code.trim().toLowerCase();}
+     if(resource==='suppliers'){body.email=form.email?.trim()||null;body.phone=form.phone?.trim()||null;}
+     try{
+       const record=await posRequest('/api/pos/management/'+resource+(form.id?'/'+form.id:''),{method:form.id?'PUT':'POST',body,csrf:this.csrf});
+       const next=this.managementData[resource].filter(row=>row.id!==record.id);
+       this.managementData[resource]=[...next,record].sort((a,b)=>a.name.localeCompare(b.name));
+       this.managementForm=null;
+       this.managementNotice='Saved '+record.name+(resource==='products'?' · code '+record.internal_code:'')+'.';
+     }catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
+     finally{this.managementBusy=false;}
+   },
+   async managementRemove(){
+     const row=this.managementDelete;
+     if(!row||this.managementBusy)return;
+     this.managementBusy=true;this.managementError='';this.managementNotice='';
+     const resource=this.page;
+     try{
+       await posRequest('/api/pos/management/'+resource+'/'+row.id,{method:'DELETE',csrf:this.csrf});
+       this.managementData[resource]=resource==='products'?
+         this.managementData[resource].map(p=>p.id===row.id?{...p,is_active:false}:p):
+         this.managementData[resource].filter(p=>p.id!==row.id);
+       this.managementDelete=null;
+       this.managementNotice=(resource==='products'?'Archived ':'Deleted ')+row.name+'.';
+     }catch(err){if(!(await this.expireSession(err))){this.managementDelete=null;this.managementError=err.message;}}
+     finally{this.managementBusy=false;}
+   },
+   rowValues(row){
+     if(this.page==='products')return [row.internal_code,row.name,row.barcode||'—',this.money(row.price_minor),row.is_active?'Active':'Archived'];
+     if(this.page==='categories')return [row.name,row.slug];
+     if(this.page==='units')return [row.name,row.code,row.quantity_precision];
+     return [row.name,row.email||'—',row.phone||'—'];
+   },
    async loadCatalog(){
      this.catalogState='loading';
-     const local = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
-     const base = posApiBaseUrl || (local ? 'http://127.0.0.1:8000' : '');
-     const controller = new AbortController();
-     const timeout = setTimeout(()=>controller.abort(), 8000);
      try {
-       const response = await fetch(base+'/api/pos/catalog',{headers:{Accept:'application/json'},signal:controller.signal});
-       if(!response.ok)throw new Error('Catalog request failed: '+response.status);
-       const result=normalizeCatalog(await response.json());
+       const result=normalizeCatalog(await posRequest('/api/pos/catalog'));
        this.categories=result.categories;
        this.catalog=result.products;
+       if(!this.categories.some(c=>c.id===this.category))this.category='all';
        this.catalogState='ready';
-       if(this.orderNumber==='001' && !this.lines.length && !this.note && !this.customer)this.loadSample();
-     } catch {
-       this.catalogState='error';
-     } finally { clearTimeout(timeout); }
+       if(!this.sampleInitialized){
+         this.sampleInitialized=true;
+         if(this.orderNumber==='001'&&!this.lines.length&&!this.note&&!this.customer)this.loadSample();
+       }
+     } catch (err) {
+       if(!(await this.expireSession(err)))this.catalogState='error';
+     }
    },
    money(cents){return 'Rs. '+format.format(cents/100);},
    quantity(value){return new Intl.NumberFormat('en-PK',{maximumFractionDigits:3}).format(value);},
@@ -96,8 +256,19 @@ const app = Vue.createApp({
    inCart(id){return this.lines.find(l=>l.id===id)?.qty||0;},
    select(id){this.selected=id;this.mode='Qty';this.buffer='';},
    add(p){const line=this.lines.find(l=>l.id===p.id); if(line){line.qty=Math.min(9999,Math.round((line.qty+1)*1000)/1000);}else{this.lines.push(createLine(p));}this.select(p.id);},
-   clearSearch(){this.query='';this.$nextTick(()=>document.querySelector('#search')?.focus());},
-   addMatch(){if(this.filtered.length===1)this.add(this.filtered[0]);},
+   clearSearch(keepStatus=false){this.query='';if(!keepStatus)this.searchStatus='';this.$nextTick(()=>document.querySelector('#search')?.focus());},
+   addMatch(){
+     const query=this.query.trim().toLowerCase();
+     if(!query||this.catalogState!=='ready')return;
+     const exact=this.catalog.filter(p=>[p.id,p.code,p.barcode].some(v=>v&&v.toLowerCase()===query));
+     const matches=exact.length?exact:this.filtered;
+     if(matches.length!==1){
+       this.searchStatus=matches.length?'Multiple matches. Pick a product from the list.':'No product found for that code or barcode.';
+       document.querySelector('#search')?.select();
+       return;
+     }
+     this.add(matches[0]);this.searchStatus='Added '+matches[0].name+'.';this.clearSearch(true);
+   },
    loadSample(){this.clearOrder();this.lines=sampleOrder.flatMap(([sku,qty])=>{const p=this.catalog.find(p=>p.id===sku);return p?[createLine(p,p.precision===0?Math.ceil(qty):qty)]:[];});this.select(this.lines.at(-1)?.id??null);this.menu=false;},
    clearOrder(){this.lines=[];this.select(null);this.customer='';this.note='';},
    newOrder(){this.menu=false;if(this.lines.length||this.note||this.customer){this.openDialog('new');}else this.startNew();},
@@ -126,7 +297,7 @@ const app = Vue.createApp({
    openDialog(name){this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
    closeDialog(){document.getElementById('dialog')?.close();},
    keyboard(e){
-     if(e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||this.dialogName||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;
+     if(!this.user||this.page!=='register'||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||this.dialogName||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;
      if(e.key==='/'){e.preventDefault();document.getElementById('search')?.focus();}
      else if(this.activeLine && /^[0-9.]$/.test(e.key)){e.preventDefault();this.press(e.key);}
      else if(this.activeLine && ['Backspace','Delete'].includes(e.key)){e.preventDefault();this.press(e.key==='Delete'?'−':'Delete');}
@@ -135,6 +306,6 @@ const app = Vue.createApp({
 });
 app.component('svg-icon',{
  props:{name:String},
- render(){return Vue.h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':1.7,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':true,innerHTML:svgPaths[this.name]||''});}
+ render(){return Vue.h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':1.7,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':true,innerHTML:Object.hasOwn(svgPaths,this.name)?svgPaths[this.name]:''});}
 });
 app.mount('#app');
