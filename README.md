@@ -1,25 +1,21 @@
-# POS Sale Screen
+# Super Store POS Frontend
 
-An Odoo-inspired, frontend-only register demo. Vue 3 powers the screen and Tailwind CSS styles it. There is no Laravel/MySQL dependency, stock mutation, payment processing or persistent checkout.
+An Odoo-inspired sale screen built with Vue 3 and Tailwind CSS. Products, categories, unit precision, and PKR prices load from the Laravel/MySQL catalog. There is no hard-coded catalog fallback. Cart changes and payment preview stay in the browser; the app does not process payments or save sales.
 
 ## Run locally
 
-Requires Node.js 20+ and npm. From this directory:
+1. In the paired Laravel backend, configure MySQL, run `php artisan migrate --seed`, and start Laravel on `http://127.0.0.1:8000`.
+2. With Node.js 20+ from the frontend folder, run:
 
-```sh
-npm ci
-npm run build
-npx --yes http-server dist
-```
+   ```sh
+   npm ci
+   npm run dev
+   ```
 
-Open the URL printed by the static server. The built dist directory is self-contained and can also be served by any static host.
+3. Open `http://127.0.0.1:4173`. Fresh seeded data should show 16 products and a sample order totaling Rs. 375.00. Try **0.75 kg** on Red Apples with the keypad; its undiscounted line total is Rs. 240.00.
 
-## Try it
+`npm run dev` builds and serves the frontend. After changing source files, restart the command and refresh. To build without starting a server, use `npm run build`.
 
-- The register starts with a sample order (Rs. 375.00). Use **+** for a new order or **Clear order** for an empty cart. The register menu can reload the sample.
-- Filter four categories and search 16 products by name, SKU or unit. Click a card to add it. Press Enter when a search has just one result.
-- Select a cart line to use the Qty, % Disc and Price keypad. Try **0.75 kg** for Red Apples, which makes the line Rs. 240.00 before discount. Counted units use whole numbers. Use **−** to remove the selected line.
-- **Payment** opens a preview only. Reloading restores the initial sample.
-- On a narrow screen switch between Products and Order using the bottom bar.
+If the screen shows a catalog error, verify `http://127.0.0.1:8000/api/pos/catalog`, then click **Retry**. The API defaults to `http://127.0.0.1:8000` when the page is on loopback; otherwise requests use the page's own origin. To use a different API URL, set `POS_API_BASE_URL` before `npm run build` and allow the frontend's origin in the backend's `POS_FRONTEND_ORIGINS`. In PowerShell, for example: `$env:POS_API_BASE_URL = 'http://127.0.0.1:8000'`. The base URL is public build configuration, so do not include secrets in it.
 
-Demo catalog: `src/app.js`. Vue template: `src/index.html`. Styles: `src/style.css`.
+SKU search, category filters, cart and keypad all work on the loaded catalog. **Payment** is a preview, not checkout.

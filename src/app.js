@@ -14,31 +14,30 @@ const svgPaths = {
   pantry:'<path d="M5 8h14v12H5zM4 4h16v4H4zm6 8h4"/>',
   produce:'<path d="M12 8c-3-3-9-1-8 4 1 5 4 9 8 7 4 2 7-2 8-7 1-5-5-7-8-4Zm0 0V4m0 3c1-3 3-4 5-4"/>'
 };
-const categories = [
-  {id:'all',name:'All products',icon:'grid',color:'#87657f'},
-  {id:'drinks',name:'Beverages',icon:'drink',color:'#568eab'},
-  {id:'snacks',name:'Snacks',icon:'snack',color:'#bd8548'},
-  {id:'grocery',name:'Grocery',icon:'pantry',color:'#aa6d92'},
-  {id:'produce',name:'Fresh Produce',icon:'produce',color:'#699177'}
-];
-const catalog = [
-  ['MIN-01','Mineral Water','drinks','piece',60,'bottle','#5bb4e6','#e3f1f7','PURE'],
-  ['COL-02','Cola Can','drinks','piece',110,'can','#b8293b','#f5e8eb','COLA'],
-  ['MAN-03','Mango Juice','drinks','pack',125,'carton','#d78626','#f9efdb','MANGO'],
-  ['MKT-04','Milk 1 L','drinks','pack',280,'carton','#5694bf','#e9f0f7','MILK'],
-  ['CHP-05','Salted Chips','snacks','pack',95,'bag','#d8942d','#fbf2df','CHIPS'],
-  ['BIS-06','Chocolate Biscuits','snacks','pack',150,'bag','#8c4f3b','#f6ebe5','CHOCO'],
-  ['NUT-07','Mixed Nuts','snacks','pack',260,'bag','#a16645','#f5ede3','NUTS'],
-  ['POP-08','Caramel Popcorn','snacks','pack',180,'bag','#b6627a','#f8eaf0','POP'],
-  ['RIC-09','Basmati Rice','grocery','kg',340,'bag','#739059','#edf1e6','RICE'],
-  ['FLR-10','Wheat Flour','grocery','kg',165,'bag','#bf8b58','#f6eee1','FLOUR'],
-  ['OIL-11','Cooking Oil 1 L','grocery','bottle',540,'bottle','#d09a39','#f8f0dd','OIL'],
-  ['TEA-12','Black Tea','grocery','box',420,'box','#367c79','#e8f2ed','TEA'],
-  ['APL-13','Red Apples','produce','kg',320,'apple','#bf374a','#faeaeb',''],
-  ['BAN-14','Bananas','produce','dozen',230,'banana','#d7a833','#faf2dd',''],
-  ['TOM-15','Tomatoes','produce','kg',190,'tomato','#d64a3d','#f8eae4',''],
-  ['ORA-16','Oranges','produce','kg',245,'orange','#e29335','#faecdd','']
-].map(([id,name,category,unit,price,shape,ink,tone,label])=>({id,name,category,unit,price:price*100,shape,ink,tone,label}));
+const allProducts = {id:'all', name:'All products', icon:'grid', color:'#87657f'};
+const sampleOrder = [['MIN-01',2], ['CHP-05',1], ['APL-13',0.5]];
+const allowedShapes = new Set(['bottle','can','carton','bag','box','apple','banana','tomato','orange']);
+const safeColor = (value, fallback) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+function normalizeCatalog(data) {
+ const {currency,categories,units,products} = data;
+ if(currency!=='PKR' || !Array.isArray(categories) || !Array.isArray(units) || !Array.isArray(products))
+   throw new Error('The catalog response has the wrong format.');
+ const categoryIds = new Set(categories.map(c=>c.slug));
+ const unitByCode = new Map(units.map(u=>[u.code,u]));
+ return {
+   categories:[allProducts,...categories.map(c=>({id:c.slug,name:c.name,icon:c.icon,color:safeColor(c.color,'#87657f')}))],
+   products:products.map(p=>{
+     const unit=unitByCode.get(p.unit);
+     if(typeof p.sku!=='string' || typeof p.name!=='string' || !categoryIds.has(p.category) || !unit ||
+        !Number.isInteger(unit.quantity_precision) || unit.quantity_precision<0 || unit.quantity_precision>3 ||
+        !Number.isSafeInteger(p.price_minor) || p.price_minor<0) throw new Error('The catalog contains an invalid product.');
+     const art=p.art??{};
+     return {id:p.sku,name:p.name,category:p.category,unit:p.unit,precision:unit.quantity_precision,price:p.price_minor,
+       shape:allowedShapes.has(art.shape)?art.shape:'box',ink:safeColor(art.ink,'#87657f'),
+       tone:safeColor(art.tone,'#f4edf3'),label:typeof art.label==='string' && /^[A-Z0-9 ]{0,12}$/.test(art.label)?art.label:''};
+   })
+ };
+}
 
 function art({shape,ink:c,label:l}) {
  const outline='#271f2c';
@@ -62,17 +61,35 @@ const createLine = (p,qty=1)=>({...p,qty,discount:0});
 const dialogs = {clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Payment preview',help:'Keyboard shortcuts'};
 const app = Vue.createApp({
  render: registerRender,
- data:()=>({categories,catalog,category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
+ data:()=>({categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
    categoryName(){return this.categories.find(c=>c.id===this.category).name;},
    filtered(){const q=this.query.trim().toLowerCase();return this.catalog.filter(p=>(this.category==='all'||p.category===this.category)&&(!q||[p.name,p.id,p.unit].some(s=>s.toLowerCase().includes(q))));},
    activeLine(){return this.lines.find(l=>l.id===this.selected);},
    total(){return this.lines.reduce((sum,l)=>sum+this.lineTotal(l),0);}
  },
- mounted(){this.loadSample();window.addEventListener('keydown',this.keyboard);},
+ mounted(){void this.loadCatalog();window.addEventListener('keydown',this.keyboard);},
  beforeUnmount(){window.removeEventListener('keydown',this.keyboard);},
  methods:{
    art,
+   async loadCatalog(){
+     this.catalogState='loading';
+     const local = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+     const base = posApiBaseUrl || (local ? 'http://127.0.0.1:8000' : '');
+     const controller = new AbortController();
+     const timeout = setTimeout(()=>controller.abort(), 8000);
+     try {
+       const response = await fetch(base+'/api/pos/catalog',{headers:{Accept:'application/json'},signal:controller.signal});
+       if(!response.ok)throw new Error('Catalog request failed: '+response.status);
+       const result=normalizeCatalog(await response.json());
+       this.categories=result.categories;
+       this.catalog=result.products;
+       this.catalogState='ready';
+       if(this.orderNumber==='001' && !this.lines.length && !this.note && !this.customer)this.loadSample();
+     } catch {
+       this.catalogState='error';
+     } finally { clearTimeout(timeout); }
+   },
    money(cents){return 'Rs. '+format.format(cents/100);},
    quantity(value){return new Intl.NumberFormat('en-PK',{maximumFractionDigits:3}).format(value);},
    lineTotal(line){return Math.round(line.qty*line.price*(100-line.discount)/100);},
@@ -81,7 +98,7 @@ const app = Vue.createApp({
    add(p){const line=this.lines.find(l=>l.id===p.id); if(line){line.qty=Math.min(9999,Math.round((line.qty+1)*1000)/1000);}else{this.lines.push(createLine(p));}this.select(p.id);},
    clearSearch(){this.query='';this.$nextTick(()=>document.querySelector('#search')?.focus());},
    addMatch(){if(this.filtered.length===1)this.add(this.filtered[0]);},
-   loadSample(){this.clearOrder();this.lines=[createLine(catalog[0],2),createLine(catalog[4]),createLine(catalog[12],0.5)];this.select(this.lines[2].id);this.menu=false;},
+   loadSample(){this.clearOrder();this.lines=sampleOrder.flatMap(([sku,qty])=>{const p=this.catalog.find(p=>p.id===sku);return p?[createLine(p,p.precision===0?Math.ceil(qty):qty)]:[];});this.select(this.lines.at(-1)?.id??null);this.menu=false;},
    clearOrder(){this.lines=[];this.select(null);this.customer='';this.note='';},
    newOrder(){this.menu=false;if(this.lines.length||this.note||this.customer){this.openDialog('new');}else this.startNew();},
    startNew(){this.clearOrder();this.orderNumber=String(Number(this.orderNumber)+1).padStart(3,'0');this.mobile='catalog';},
@@ -94,10 +111,10 @@ const app = Vue.createApp({
        if(!this.buffer){this.remove();return;}
        this.buffer=this.buffer.slice(0,-1);
      }else{
-       if(key==='.'&&(this.buffer.includes('.')||(this.mode==='Qty'&&l.unit!=='kg')))return;
+       if(key==='.'&&(this.buffer.includes('.')||(this.mode==='Qty'&&l.precision===0)))return;
        if(this.buffer.length>=9)return;
        const next=(this.buffer==='0'&&key!=='.'?'':this.buffer)+key;
-       const decimals=this.mode==='Qty'?3:2;
+       const decimals=this.mode==='Qty'?l.precision:2;
        if((next.split('.')[1]||'').length>decimals)return;
        this.buffer=next;
      }

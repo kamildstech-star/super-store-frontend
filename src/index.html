@@ -25,7 +25,7 @@
     <div class="menu-wrap">
       <button class="icon-button menu-button" aria-label="Register menu" :aria-expanded="menu" @click="menu=!menu"><svg-icon name="menu"></svg-icon></button>
       <div v-if="menu" class="menu-panel">
-        <button @click="loadSample">Load sample order</button>
+        <button @click="loadSample" :disabled="catalogState!=='ready'">Load sample order</button>
         <button @click="newOrder">New empty order</button>
         <button @click="openDialog('help')">Keyboard shortcuts</button>
       </div>
@@ -60,7 +60,7 @@
       </div>
       <div class="numpad grid grid-cols-4" aria-label="Order keypad">
         <button v-for="key in keys" :key="key" :class="{ 'mode-key':modes.includes(key), 'active-mode':mode===key, 'backspace':key==='Delete' }"
-          :disabled="!activeLine || (key==='.' && mode==='Qty' && activeLine.unit!=='kg')"
+          :disabled="!activeLine || (key==='.' && mode==='Qty' && activeLine.precision===0)"
           :aria-label="key==='Delete' ? 'Backspace' : key==='−' ? 'Remove selected item' : key"
           :aria-pressed="modes.includes(key) ? mode===key : undefined" @click="press(key)">
           <svg-icon v-if="key==='Delete'" name="backspace"></svg-icon><template v-else>{{key}}</template>
@@ -82,8 +82,10 @@
       </div>
     </div>
     <div class="catalog-content">
-      <div class="catalog-heading flex items-center justify-between"><h2>{{ categoryName }}</h2><span>{{ filtered.length }} {{ filtered.length===1 ? 'product' : 'products' }}</span></div>
-      <div v-if="filtered.length" class="product-grid">
+      <div class="catalog-heading flex items-center justify-between"><h2>{{ categoryName }}</h2><span v-if="catalogState==='ready'">{{ filtered.length }} {{ filtered.length===1 ? 'product' : 'products' }}</span></div>
+      <div v-if="catalogState==='loading'" class="no-results" role="status"><strong>Loading catalog…</strong><span>Fetching products from the POS backend.</span></div>
+      <div v-else-if="catalogState==='error'" class="no-results"><strong role="alert">Could not load the product catalog</strong><span>Check that the Laravel API is running and reachable.</span><button @click="loadCatalog">Retry</button></div>
+      <div v-else-if="filtered.length" class="product-grid">
         <button v-for="p in filtered" :key="p.id" class="product" :aria-label="'Add '+p.name" @click="add(p)">
           <div class="product-art" :style="{ '--tone':p.tone }">
             <span class="unit-label">{{ p.unit }}</span>

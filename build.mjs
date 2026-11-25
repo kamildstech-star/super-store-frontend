@@ -6,7 +6,16 @@ const template = html.match(/<div id="app" v-cloak>([\s\S]+)<\/div>\s*<noscript>
 const code = compile(template,{mode:'function',whitespace:'condense'}).code;
 mkdirSync('dist',{recursive:true});
 writeFileSync('dist/index.html',html.replace(template,''));
-writeFileSync('dist/app.js','const registerRender = (() => {\n'+code+'\n})();\n'+readFileSync('src/app.js','utf8'));
+const configuredBase=process.env.POS_API_BASE_URL?.trim();
+let apiBase='';
+if(configuredBase){
+ const url=new URL(configuredBase);
+ if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash){
+  throw new Error('POS_API_BASE_URL must be an HTTP(S) base URL without credentials, query or fragment.');
+ }
+ apiBase=url.toString().replace(/\/+$/,'');
+}
+writeFileSync('dist/app.js','const posApiBaseUrl = '+JSON.stringify(apiBase)+';\nconst registerRender = (() => {\n'+code+'\n})();\n'+readFileSync('src/app.js','utf8'));
 copyFileSync('node_modules/vue/dist/vue.runtime.global.prod.js','dist/vue.global.prod.js');
 copyFileSync('node_modules/vue/LICENSE','dist/vue-LICENSE.txt');
 execFileSync(process.execPath,['node_modules/tailwindcss/lib/cli.js','-i','src/style.css','-o','dist/style.css','--content','src/index.html,src/app.js','--minify'],{stdio:'inherit'});
