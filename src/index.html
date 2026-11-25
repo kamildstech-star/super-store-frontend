@@ -101,9 +101,9 @@
             <td class="mg-row-tools">
               <button type="button" class="secondary action-icon" @click="managementShow(row)" :disabled="managementBusy" :aria-label="'View '+row.name" :title="'View '+row.name"><pos-icon name="view"></pos-icon></button>
               <button class="secondary action-icon" @click="managementStart(row)" :disabled="managementBusy" :aria-label="'Edit '+row.name" :title="'Edit '+row.name"><pos-icon name="edit"></pos-icon></button>
-              <button v-if="page!=='products'||row.is_active" class="secondary action-icon" :disabled="managementBusy"
+              <button v-if="page!=='products'||row.is_active" class="action-icon icon-delete" type="button" :disabled="managementBusy"
                @click="managementConfirm(row)"
-               :aria-label="(page==='products'?'Archive ':'Delete ')+row.name" :title="(page==='products'?'Archive ':'Delete ')+row.name"><pos-icon :name="page==='products'?'archive':'trash'"></pos-icon></button>
+               :aria-label="(page==='products'?'Archive ':'Delete ')+row.name" :title="(page==='products'?'Archive ':'Delete ')+row.name"><pos-icon name="trash"></pos-icon></button>
             </td>
           </tr>
           <tr v-if="!manageRows.length"><td :colspan="manage.columns.length+1">{{managementBusy ? 'Loading records…' : 'No matching records.'}}</td></tr>
@@ -223,23 +223,18 @@
       <div class="pos-modal-body">
         <p v-if="managementError" class="mg-error" role="alert">{{managementError}}</p>
     <div class="mg-field-grid">
-      <label v-for="field in manage.fields.filter(f=>!f.creationOnly||!managementForm.id)" :key="field.key" class="mg-field">
-        <span>{{field.label}}</span>
-        <span v-if="field.options" class="pos-select">
-          <select v-model="managementForm[field.key]" :required="!field.optional">
-            <option value="" :disabled="!field.optional">{{field.optional ? 'None' : 'Choose…'}}</option>
-            <option v-for="opt in managementData[field.options]" :key="opt.id" :value="opt.id">{{opt.name}}</option>
-          </select>
-          <pos-icon name="back"></pos-icon>
-        </span>
-        <input v-else-if="field.type==='checkbox'" type="checkbox" v-model="managementForm[field.key]">
-        <input v-else v-model="managementForm[field.key]" :data-start-focus="field.key==='name'?'':undefined" :type="field.type||'text'" :min="field.min" :max="field.max" :step="field.step"
+      <div v-for="field in manage.fields.filter(f=>!f.creationOnly||!managementForm.id)" :key="field.key" class="mg-field">
+        <label :for="'management-'+field.key">{{field.label}}</label>
+        <pos-search-select v-if="field.options" :input-id="'management-'+field.key" :label="field.label"
+          :options="managementData[field.options]" v-model="managementForm[field.key]" :required="!field.optional" :disabled="managementBusy"></pos-search-select>
+        <input :id="'management-'+field.key" v-else-if="field.type==='checkbox'" type="checkbox" v-model="managementForm[field.key]">
+        <input :id="'management-'+field.key" v-else v-model="managementForm[field.key]" :data-start-focus="field.key==='name'?'':undefined" :type="field.type||'text'" :min="field.min" :max="field.max" :step="field.step"
          :required="field.code ? Boolean(managementForm.id) : !field.optional && field.key!=='barcode'"
          :inputmode="field.code?'numeric':undefined" :maxlength="field.code?4:undefined"
          :pattern="field.code?'[0-9]{4}':field.keyFormat?'[a-z0-9]+(?:-[a-z0-9]+)*':undefined"
          :placeholder="field.code&&!managementForm.id?'Leave blank to generate':undefined">
         <small v-if="field.code && !managementForm.id">Leave blank and Laravel assigns an unused 4-digit code.</small>
-      </label>
+      </div>
     </div>
       </div>
       <footer class="pos-modal-footer">

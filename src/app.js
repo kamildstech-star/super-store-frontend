@@ -108,7 +108,7 @@ const app = Vue.createApp({
      if(this.actionDialog==='remove')return (this.page==='products'?'Archive ':'Delete ')+(this.managementDelete?.name??'record')+'?';
      return (this.managementForm?.id?'Edit ':'New ')+(this.manage?.single??'record');
    },
-   actionIcon(){return ({order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:this.page==='products'?'archive':'trash'})[this.actionDialog];},
+   actionIcon(){return ({order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:'trash'})[this.actionDialog];},
    categoryName(){return this.categories.find(c=>c.id===this.category)?.name??'All products';},
    manage(){return this.manager[this.page];},
    manageRows(){const q=this.managementSearch.trim().toLowerCase();return (this.managementData[this.page]??[]).filter(row=>!q||this.rowValues(row).some(v=>String(v??'').toLowerCase().includes(q)));},
@@ -426,5 +426,103 @@ const app = Vue.createApp({
 app.component('pos-icon',{
  props:{name:String},
  render(){return Vue.h('svg',{viewBox:'0 0 24 24',fill:'currentColor','aria-hidden':true,focusable:'false',class:'remix-icon',innerHTML:Object.hasOwn(remixIcons,this.name)?remixIcons[this.name]:remixIcons.grid});}
+});
+const optionMeta = option => [option.slug ?? option.code, option.email, option.phone].filter(Boolean).join(' · ');
+const searchText = text => String(text ?? '').normalize('NFD').replace(/\p{M}/gu,'').toLowerCase();
+app.component('pos-search-select',{
+ props:{
+   inputId:{type:String,required:true}, label:{type:String,required:true}, modelValue:[Number,String],
+   options:{type:Array,required:true}, required:Boolean, disabled:Boolean,
+ },
+ emits:['update:modelValue'],
+ data:()=>({open:false,query:'',active:-1}),
+ computed:{
+   selected(){return this.options.find(option=>String(option.id)===String(this.modelValue));},
+   matches(){
+     const words=searchText(this.query).trim().split(/\s+/).filter(Boolean);
+     return this.options.filter(option=>{
+       const haystack=searchText(option.name+' '+optionMeta(option));
+       return words.every(word=>haystack.includes(word));
+     });
+   },
+   listId(){return this.inputId+'-options';},
+ },
+ mounted(){this.syncValidity();},
+ updated(){this.syncValidity();},
+ methods:{
+   syncValidity(){this.$refs.input.setCustomValidity(this.required&&!this.selected?'Select a '+this.label.toLowerCase()+' from the list.':'');},
+   start(){
+     if(this.disabled||this.open)return;
+     this.open=true;this.query='';this.active=this.matches.indexOf(this.selected);
+   },
+   close(){this.open=false;this.query='';this.active=-1;},
+   choose(option){this.$emit('update:modelValue',option.id);this.close();},
+   clear(){
+     this.$emit('update:modelValue','');
+     this.$refs.input.focus();this.start();this.query='';this.active=-1;
+   },
+   move(index){
+     this.active=index;
+     this.$nextTick(()=>this.$refs.list?.children[index]?.scrollIntoView?.({block:'nearest'}));
+   },
+   onKey(event){
+     if(this.disabled||event.isComposing)return;
+     if(event.key==='Escape'&&this.open){event.preventDefault();event.stopPropagation();this.close();return;}
+     if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+       event.preventDefault();
+       this.start();
+       const last=this.matches.length-1;
+       if(last<0)return;
+       this.move(event.key==='ArrowDown'?(this.active===last?0:this.active+1):(this.active<=0?last:this.active-1));
+     }else if(event.key==='Enter'&&this.open){
+       event.preventDefault();
+       const option=this.matches[this.active] ?? (this.matches.length===1?this.matches[0]:null);
+       if(option)this.choose(option);
+     }
+   },
+ },
+ render(){
+   const h=Vue.h, icon=Vue.resolveComponent('pos-icon');
+   const label=this.label.replace(/ \(optional\)$/i,'');
+   return h('div',{class:'pos-picker',onFocusout:event=>{if(!event.currentTarget.contains(event.relatedTarget))this.close();}},[
+     h('div',{class:{'pos-picker-control':true,'pos-picker-open':this.open}},[
+       h(icon,{name:'search'}),
+       h('input',{
+         ref:'input',id:this.inputId,type:'text',role:'combobox',autocomplete:'off',spellcheck:false,
+         disabled:this.disabled,required:this.required,
+         'aria-expanded':String(this.open),'aria-controls':this.listId,'aria-autocomplete':'list',
+         'aria-activedescendant':this.open&&this.active>=0?this.listId+'-'+this.active:undefined,
+         value:this.open?this.query:this.selected?.name??'',
+         placeholder:this.open?'Type to search…':'Select '+label.toLowerCase()+(this.required?'':' (optional)'),
+         onFocus:this.start,onClick:this.start,onBlur:event=>{
+           if(!event.currentTarget.parentElement.parentElement.contains(event.relatedTarget))this.close();
+         },
+         onInput:event=>{const text=event.target.value;this.start();this.query=text;this.move(this.matches.length?0:-1);},
+         onKeydown:this.onKey,
+       }),
+       this.selected&&!this.required?h('button',{
+         type:'button',class:'icon-button pos-picker-clear','aria-label':'Clear '+label.toLowerCase(),title:'Clear '+label.toLowerCase(),disabled:this.disabled,
+         onMousedown:event=>event.preventDefault(),onClick:this.clear,
+       },[h(icon,{name:'close'})]):null,
+       h(icon,{name:'back',class:'pos-picker-chevron'}),
+     ]),
+     h('div',{class:'pos-picker-panel',hidden:!this.open},[
+       h('div',{class:'pos-picker-caption',role:'status'},this.matches.length?
+         this.matches.length+' '+(this.matches.length===1?'option':'options'):
+         this.options.length?'No matching options':'No options available'),
+       h('ul',{id:this.listId,ref:'list',role:'listbox','aria-label':label},this.open?this.matches.map((option,index)=>{
+         const selected=this.selected===option;
+         return h('li',{
+           id:this.listId+'-'+index,key:option.id,role:'option','aria-selected':String(selected),
+           class:{'pos-picker-option':true,'pos-picker-active':index===this.active},
+           onMousedown:event=>event.preventDefault(),onClick:()=>this.choose(option),
+         },[
+           h('span',[h('strong',option.name),optionMeta(option)?h('small',optionMeta(option)):null]),
+           selected?h('span',{class:'pos-picker-selected','aria-hidden':'true'},'Selected'):null,
+         ]);
+       }):[]),
+     ]),
+   ]);
+ },
 });
 app.mount('#app');
