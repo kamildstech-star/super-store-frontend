@@ -97,11 +97,18 @@ const dialogs = {clear:'Clear order?',new:'New order?',customer:'Customer',note:
 const app = Vue.createApp({
  render: registerRender,
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
-   managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,managementSearch:'',
+   managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,managementSearch:'',actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
    orders:[],ordersCursor:null,ordersBusy:false,ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    orderRequestId:null,orderSaving:false,orderSaveError:'',savedOrderId:null,searchStatus:'',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
+   actionTitle(){
+     if(this.actionDialog==='order')return 'Order '+this.orderRef(this.previewedOrder?.id ?? this.previewOrderId);
+     if(this.actionDialog==='view')return this.managementView?.name ?? 'Record details';
+     if(this.actionDialog==='remove')return (this.page==='products'?'Archive ':'Delete ')+(this.managementDelete?.name??'record')+'?';
+     return (this.managementForm?.id?'Edit ':'New ')+(this.manage?.single??'record');
+   },
+   actionIcon(){return ({order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:this.page==='products'?'archive':'trash'})[this.actionDialog];},
    categoryName(){return this.categories.find(c=>c.id===this.category)?.name??'All products';},
    manage(){return this.manager[this.page];},
    manageRows(){const q=this.managementSearch.trim().toLowerCase();return (this.managementData[this.page]??[]).filter(row=>!q||this.rowValues(row).some(v=>String(v??'').toLowerCase().includes(q)));},
@@ -153,6 +160,7 @@ const app = Vue.createApp({
      finally{this.authBusy=false;}
    },
    resetAuth(){
+     this.closeActionDialog(true);
      this.user=null;this.authState='guest';this.profile=false;this.menu=false;
      this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
      this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';this.searchStatus='';
@@ -166,6 +174,7 @@ const app = Vue.createApp({
      return true;
    },
    async goPage(page){
+     this.closeActionDialog(true);
      this.page=page;this.menu=false;this.profile=false;this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;
      this.managementForm=null;this.managementDelete=null;this.managementError='';this.managementNotice='';
      this.managementSearch='';
@@ -185,20 +194,54 @@ const app = Vue.createApp({
      }catch(err){if(!(await this.expireSession(err)))this.ordersError=err.message;}
      finally{this.ordersBusy=false;}
    },
-   async showOrder(id){
+   openActionDialog(type){
+     this.actionDialog=type;
+     this.profile=false;this.menu=false;
+     this.$nextTick(()=>{
+       if(this.actionDialog!==type)return;
+       const dialog=document.getElementById('action-dialog');
+       if(dialog&&!dialog.open){
+         dialog.showModal();
+         dialog.querySelector('[data-start-focus]')?.focus();
+       }
+     });
+   },
+   closeActionDialog(force=false){
+     if(!this.actionDialog||(!force&&this.managementBusy))return;
+     if(this.actionDialog==='order'){
+       this.orderDetailRequest++;
+       this.orderDetailBusy=false;
+     }
+     document.getElementById('action-dialog')?.close();
+     this.actionDialog='';this.managementForm=null;this.managementDelete=null;
+     this.managementView=null;this.previewedOrder=null;this.previewOrderId=null;
+     this.managementError='';this.previewError='';
+   },
+   openSavedOrder(order){
+     if(!order)return;
+     this.closeActionDialog(true);
+     this.viewedOrder=order;
+     this.page='register';
+     this.profile=false;this.menu=false;
+     this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
+   },
+   async showOrder(id,preview=false){
+     if(preview){
+       this.previewedOrder=null;this.previewOrderId=id;this.previewError='';
+       this.openActionDialog('order');
+     }
      const request=++this.orderDetailRequest;
-     this.viewedOrder=null;this.orderDetailBusy=true;this.ordersError='';
+     this.orderDetailBusy=true;this.ordersError='';
      try{
        const order=await posRequest('/api/pos/orders/'+id);
-       if(request===this.orderDetailRequest){
-         this.viewedOrder=order;
-         this.page='register';
-         this.profile=false;
-         this.menu=false;
-         this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
-       }
-     }catch(err){if(!(await this.expireSession(err))&&request===this.orderDetailRequest)this.ordersError=err.message;}
-     finally{if(request===this.orderDetailRequest)this.orderDetailBusy=false;}
+       if(request!==this.orderDetailRequest)return;
+       if(preview)this.previewedOrder=order;
+       else this.openSavedOrder(order);
+     }catch(err){
+       if(request!==this.orderDetailRequest||await this.expireSession(err))return;
+       if(preview)this.previewError=err.message;
+       else this.ordersError=err.message;
+     }finally{if(request===this.orderDetailRequest)this.orderDetailBusy=false;}
    },
    async saveOrder(){
      if(this.orderSaving||!this.lines.length)return;
@@ -229,6 +272,25 @@ const app = Vue.createApp({
      this.managementForm=row?{...row,price:row.price_minor===undefined?'':(row.price_minor/100).toFixed(2)}:
        {name:'',internal_code:'',barcode:'',price:'',category_id:'',unit_id:'',supplier_id:'',
         is_active:true,slug:'',code:'',quantity_precision:0,email:'',phone:''};
+     this.openActionDialog('form');
+   },
+   managementShow(row){
+     this.managementView=row;
+     this.openActionDialog('view');
+   },
+   managementConfirm(row){
+     this.managementDelete=row;this.managementError='';this.managementNotice='';
+     this.openActionDialog('remove');
+   },
+   managementDetails(row){
+     if(!row)return [];
+     return this.manage.fields.map(field=>{
+       const raw=row[field.key];
+       const value=field.key==='price'?this.money(row.price_minor):
+         field.type==='checkbox'?(raw?'Yes':'No'):
+         field.options?this.managementData[field.options].find(option=>option.id===raw)?.name:raw;
+       return {label:field.label.replace(/ \(.*\)$/, ''),value:value===null||value===undefined||value===''?'—':value};
+     });
    },
    async managementSave(){
      const form=this.managementForm;
@@ -248,7 +310,7 @@ const app = Vue.createApp({
        const record=await posRequest('/api/pos/management/'+resource+(form.id?'/'+form.id:''),{method:form.id?'PUT':'POST',body,csrf:this.csrf});
        const next=this.managementData[resource].filter(row=>row.id!==record.id);
        this.managementData[resource]=[...next,record].sort((a,b)=>a.name.localeCompare(b.name));
-       this.managementForm=null;
+       this.closeActionDialog(true);
        this.managementNotice='Saved '+record.name+(resource==='products'?' · code '+record.internal_code:'')+'.';
      }catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
      finally{this.managementBusy=false;}
@@ -263,9 +325,9 @@ const app = Vue.createApp({
        this.managementData[resource]=resource==='products'?
          this.managementData[resource].map(p=>p.id===row.id?{...p,is_active:false}:p):
          this.managementData[resource].filter(p=>p.id!==row.id);
-       this.managementDelete=null;
+       this.closeActionDialog(true);
        this.managementNotice=(resource==='products'?'Archived ':'Deleted ')+row.name+'.';
-     }catch(err){if(!(await this.expireSession(err))){this.managementDelete=null;this.managementError=err.message;}}
+     }catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
      finally{this.managementBusy=false;}
    },
    rowValues(row){
