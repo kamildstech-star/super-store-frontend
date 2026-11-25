@@ -35,8 +35,8 @@
     </button>
   </nav>
   <div class="top-actions">
-    <button v-if="page==='register' && !viewedOrder" class="new-order" @click="newOrder" aria-label="New order" title="New order"><pos-icon name="add"></pos-icon></button>
-    <div v-if="page==='register' && !viewedOrder" class="menu-wrap" data-header-popover="menu">
+    <button v-if="page==='register' && !viewedOrder && !editingOrder" class="new-order" @click="newOrder" aria-label="New order" title="New order"><pos-icon name="add"></pos-icon></button>
+    <div v-if="page==='register' && !viewedOrder && !editingOrder" class="menu-wrap" data-header-popover="menu">
       <button class="icon-button" type="button" aria-label="Register menu" title="Register menu" aria-controls="register-dropdown" :aria-expanded="menu" @click="menu=!menu; profile=false"><pos-icon name="menu"></pos-icon></button>
       <div id="register-dropdown" v-show="menu" class="menu-panel pos-dropdown" role="group" aria-label="Register shortcuts">
         <span class="pos-dropdown-label">Register shortcuts</span>
@@ -62,7 +62,7 @@
     <div><span class="eyebrow">POINT OF SALE</span><h1>Orders</h1></div>
     <button class="secondary" type="button" @click="loadOrders()" :disabled="ordersBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
   </div>
-  <p v-if="savedOrderId" class="mg-notice" role="status">Order {{orderRef(savedOrderId)}} saved. No payment was processed.</p>
+  <p v-if="savedOrderId" class="mg-notice" role="status">Order {{orderRef(savedOrderId)}} {{savedOrderEdited ? 'updated' : 'saved'}}. No payment was processed.</p>
   <p v-if="ordersError" class="mg-error" role="alert">{{ordersError}}</p>
   <p v-if="orderDetailBusy && !actionDialog" role="status">Loading order…</p>
   <section class="mg-list" aria-label="Saved orders">
@@ -73,8 +73,12 @@
           <td><button type="button" class="order-ref-link" @click.stop="showOrder(order.id)">{{orderRef(order.id)}}</button></td>
           <td>{{orderDate(order.created_at)}}</td><td>{{order.cashier}}</td><td>{{order.customer||'Walk-in'}}</td>
           <td>{{order.line_count}}</td><td>{{money(order.total_minor)}}</td>
-          <td><button type="button" class="secondary action-icon" @click.stop="showOrder(order.id,true)"
-            :aria-label="'View order '+orderRef(order.id)" :title="'View order '+orderRef(order.id)"><pos-icon name="view"></pos-icon></button></td>
+          <td class="mg-row-tools">
+            <button type="button" class="secondary action-icon" @click.stop="showOrder(order.id,true)"
+              :aria-label="'View order '+orderRef(order.id)" :title="'View order '+orderRef(order.id)"><pos-icon name="view"></pos-icon></button>
+            <button type="button" class="secondary action-icon" @click.stop="showOrder(order.id,false,true)"
+              :aria-label="'Edit order '+orderRef(order.id)" :title="'Edit order '+orderRef(order.id)"><pos-icon name="edit"></pos-icon></button>
+          </td>
         </tr>
         <tr v-if="!orders.length"><td colspan="7">{{ordersBusy ? 'Loading orders…' : ordersError ? 'Could not load orders.' : 'No saved orders yet. Save one from the register.'}}</td></tr>
       </tbody>
@@ -116,14 +120,19 @@
 <main v-if="user && page==='register'" class="workspace" :class="{ 'show-order': mobile==='order' || viewedOrder, 'view-saved-order': viewedOrder }">
   <section class="order-panel" :aria-label="viewedOrder ? 'Saved order items' : 'Current order'">
     <div class="order-head flex items-center justify-between">
-      <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{viewedOrder ? orderRef(viewedOrder.id) : '#'+orderNumber}}</h1></div>
-      <button v-if="!viewedOrder" class="icon-button trash" aria-label="Clear order" title="Clear order" :disabled="!lines.length" @click="openDialog('clear')"><pos-icon name="trash"></pos-icon></button>
+      <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : editingOrder ? 'EDITING SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{saleOrderRef}}</h1></div>
+      <button v-if="!viewedOrder && !editingOrder" class="icon-button trash" aria-label="Clear order" title="Clear order" :disabled="!lines.length" @click="openDialog('clear')"><pos-icon name="trash"></pos-icon></button>
     </div>
     <div class="order-lines" aria-label="Cart items">
-      <component :is="viewedOrder ? 'div' : 'button'" v-for="line in displayedLines" :key="line.id" class="order-line" :class="{ selected: !viewedOrder && line.id===selected }" :aria-pressed="viewedOrder ? undefined : line.id===selected" @click="!viewedOrder && select(line.id)">
-        <span><strong>{{ line.name }}</strong><small>{{ quantity(line.qty) }} {{ line.unit }} × {{ money(line.price) }}<template v-if="line.discount"> · {{ line.discount }}% off</template></small></span>
-        <strong>{{ money(lineTotal(line)) }}</strong>
-      </component>
+      <div v-for="line in displayedLines" :key="line.id" class="cart-row" :class="{ selected:!viewedOrder && line.id===selected }">
+        <button v-if="!viewedOrder" type="button" class="icon-button cart-remove" @click="remove(line.id)"
+          :aria-label="'Remove '+line.name+' from order'" :title="'Remove '+line.name"><pos-icon name="close"></pos-icon></button>
+        <component :is="viewedOrder ? 'div' : 'button'" class="order-line" :type="viewedOrder ? undefined : 'button'"
+          :aria-pressed="viewedOrder ? undefined : line.id===selected" @click="!viewedOrder && select(line.id)">
+          <span><strong>{{line.name}}</strong><small>{{quantity(line.qty)}} {{line.unit}} × {{money(line.price)}}<template v-if="line.discount"> · {{line.discount}}% off</template><template v-if="line.locked"> · Unavailable in catalog</template></small></span>
+          <strong>{{money(lineTotal(line))}}</strong>
+        </component>
+      </div>
       <div v-if="!displayedLines.length" class="empty-order">
         <div class="empty-icon"><pos-icon name="basket"></pos-icon></div>
         <strong>No products in this order</strong><span>Tap a product to start a sale.</span>
@@ -141,13 +150,17 @@
       </div>
       <div class="numpad grid grid-cols-4" aria-label="Order keypad">
         <button v-for="key in keys" :key="key" :class="{ 'mode-key':modes.includes(key), 'active-mode':mode===key, 'backspace':key==='Delete' }"
-          :disabled="!activeLine || (key==='.' && mode==='Qty' && activeLine.precision===0)"
+          :disabled="!activeLine || (activeLine.locked && !['−','Delete'].includes(key)) || (key==='.' && mode==='Qty' && activeLine.precision===0)"
           :aria-label="key==='Delete' ? 'Backspace' : key==='−' ? 'Remove selected item' : key"
           :aria-pressed="modes.includes(key) ? mode===key : undefined" @click="press(key)">
           <pos-icon v-if="key==='Delete' || key==='−'" :name="key==='Delete'?'backspace':'remove'"></pos-icon><template v-else>{{key}}</template>
         </button>
       </div>
-      <button class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><pos-icon name="card"></pos-icon> Payment</button>
+      <div v-if="editingOrder" class="order-edit-actions">
+        <button type="button" class="secondary" @click="requestEditExit()">Cancel edit</button>
+        <button type="button" class="pay-button" :disabled="!lines.length" @click="openDialog('update')">Save changes</button>
+      </div>
+      <button v-else class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><pos-icon name="card"></pos-icon> Payment</button>
       </template>
     </div>
   </section>
@@ -290,11 +303,15 @@
 <dialog id="dialog" @cancel="orderSaving && $event.preventDefault()" @close="dialogName=''">
   <div class="dialog-body" v-if="dialogName">
     <div class="flex items-center justify-between dialog-heading"><h2>{{ dialogTitles[dialogName] }}</h2><button class="icon-button" @click="closeDialog" aria-label="Close dialog" :disabled="orderSaving"><pos-icon name="close"></pos-icon></button></div>
-    <template v-if="dialogName==='payment'">
-      <p>Save this order to history. This does not collect payment or change stock.</p>
-      <div class="payment-preview"><span>Order #{{orderNumber}} · {{lines.length}} {{lines.length===1?'line':'lines'}}</span><strong>{{money(total)}}</strong></div>
+    <template v-if="dialogName==='payment' || dialogName==='update'">
+      <p>{{editingOrder ? 'Update this saved order. This does not collect payment or change stock.' : 'Save this order to history. This does not collect payment or change stock.'}}</p>
+      <div class="payment-preview"><span>Order {{saleOrderRef}} · {{lines.length}} {{lines.length===1?'line':'lines'}}</span><strong>{{money(total)}}</strong></div>
       <p v-if="orderSaveError" class="mg-error" role="alert">{{orderSaveError}}</p>
-      <div class="dialog-buttons"><button @click="closeDialog" :disabled="orderSaving">Back</button><button class="primary" @click="saveOrder" :disabled="orderSaving">{{orderSaving?'Saving…':'Save order'}}</button></div>
+      <div class="dialog-buttons"><button @click="closeDialog" :disabled="orderSaving">Back</button><button class="primary" @click="saveOrder" :disabled="orderSaving">{{orderSaving?'Saving…':editingOrder?'Save changes':'Save order'}}</button></div>
+    </template>
+    <template v-if="dialogName==='discard'">
+      <p>Changes to this saved order will be discarded. Your original cart will be restored.</p>
+      <div class="dialog-buttons"><button @click="closeDialog">Keep editing</button><button class="danger" @click="discardOrderEdit">Discard changes</button></div>
     </template>
     <template v-if="dialogName==='clear'">
       <p>Remove all products from the current order?</p>

@@ -93,14 +93,14 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
 
 const pages = [{id:'register',label:'Register'}, {id:'orders',label:'Orders'},
   ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
-const dialogs = {clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Review order',help:'Keyboard shortcuts'};
+const dialogs = {clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Review order',update:'Save order changes?',discard:'Discard order changes?',help:'Keyboard shortcuts'};
 const app = Vue.createApp({
  render: registerRender,
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
    managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,managementSearch:'',actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
    orders:[],ordersCursor:null,ordersBusy:false,ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
-   orderRequestId:null,orderSaving:false,orderSaveError:'',savedOrderId:null,searchStatus:'',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
+   orderRequestId:null,orderSaving:false,orderSaveError:'',savedOrderId:null,savedOrderEdited:false,editingOrder:null,parkedDraft:null,editExitPage:'orders',searchStatus:'',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
    actionTitle(){
      if(this.actionDialog==='order')return 'Order '+this.orderRef(this.previewedOrder?.id ?? this.previewOrderId);
@@ -121,6 +121,7 @@ const app = Vue.createApp({
        ? this.viewedOrder.lines.map(l=>({id:l.sku,name:l.name,unit:l.unit,qty:l.qty,price:l.price_minor,discount:l.discount,savedTotal:l.total_minor}))
        : this.lines;
    },
+   saleOrderRef(){return this.viewedOrder ? this.orderRef(this.viewedOrder.id) : this.editingOrder ? this.orderRef(this.editingOrder.id) : '#'+this.orderNumber;},
    displayedTotal(){return this.viewedOrder?.total_minor ?? this.total;}
  },
  mounted(){
@@ -160,6 +161,7 @@ const app = Vue.createApp({
      }finally{this.authBusy=false;}
    },
    async logout(){
+     if(this.editingOrder){this.requestEditExit('logout');return;}
      this.authBusy=true;this.authError='';
      try{
        const data=await posRequest('/api/pos/auth/logout',{method:'POST',csrf:this.csrf});
@@ -173,6 +175,7 @@ const app = Vue.createApp({
      this.user=null;this.authState='guest';this.profile=false;this.menu=false;
      this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
      this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';this.searchStatus='';
+     this.editingOrder=null;this.parkedDraft=null;this.savedOrderEdited=false;
      this.clearOrder();this.orderNumber='001';this.orders=[];this.ordersCursor=null;this.ordersError='';
      this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;this.savedOrderId=null;
    },
@@ -183,6 +186,7 @@ const app = Vue.createApp({
      return true;
    },
    async goPage(page){
+     if(this.editingOrder){if(page!=='register')this.requestEditExit(page);return;}
      this.closeActionDialog(true);
      this.page=page;this.menu=false;this.profile=false;this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;
      this.managementForm=null;this.managementDelete=null;this.managementError='';this.managementNotice='';
@@ -234,7 +238,7 @@ const app = Vue.createApp({
      this.profile=false;this.menu=false;
      this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
    },
-   async showOrder(id,preview=false){
+   async showOrder(id,preview=false,edit=false){
      if(preview){
        this.previewedOrder=null;this.previewOrderId=id;this.previewError='';
        this.openActionDialog('order');
@@ -245,23 +249,59 @@ const app = Vue.createApp({
        const order=await posRequest('/api/pos/orders/'+id);
        if(request!==this.orderDetailRequest)return;
        if(preview)this.previewedOrder=order;
-       else this.openSavedOrder(order);
+       else if(edit){
+         await this.loadCatalog();
+         if(request===this.orderDetailRequest)this.openOrderEditor(order);
+       }else this.openSavedOrder(order);
      }catch(err){
        if(request!==this.orderDetailRequest||await this.expireSession(err))return;
        if(preview)this.previewError=err.message;
        else this.ordersError=err.message;
      }finally{if(request===this.orderDetailRequest)this.orderDetailBusy=false;}
    },
+   openOrderEditor(order){
+     this.closeActionDialog(true);
+     this.parkedDraft={
+       lines:this.lines,selected:this.selected,customer:this.customer,note:this.note,
+       orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer,
+     };
+     this.editingOrder={id:order.id,revision:order.revision};
+     this.viewedOrder=null;this.page='register';this.mobile='order';
+     this.customer=order.customer??'';this.note=order.note??'';
+     this.lines=order.lines.map(line=>{
+       const current=this.catalog.find(product=>product.id===line.sku);
+       return {id:line.sku,name:line.name,unit:line.unit,price:line.price_minor,
+         qty:line.qty,discount:line.discount,precision:current?.precision??3,locked:!current};
+     });
+     this.select(this.lines[0]?.id??null);
+     this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
+   },
+   requestEditExit(page='orders'){this.editExitPage=page;this.openDialog('discard');},
+   restoreParkedDraft(){
+     if(this.parkedDraft)Object.assign(this,this.parkedDraft);
+     this.parkedDraft=null;this.editingOrder=null;
+   },
+   discardOrderEdit(){
+     const page=this.editExitPage;
+     this.restoreParkedDraft();
+     this.closeDialog();
+     if(page==='logout')return this.logout();
+     return this.goPage(page);
+   },
    async saveOrder(){
      if(this.orderSaving||!this.lines.length)return;
      this.orderSaving=true;this.orderSaveError='';
+     const edit=this.editingOrder;
      try{
-       this.orderRequestId??=crypto.randomUUID();
-       const saved=await posRequest('/api/pos/orders',{method:'POST',csrf:this.csrf,body:{
-         request_id:this.orderRequestId,customer:this.customer||null,note:this.note||null,
+       if(!edit)this.orderRequestId??=crypto.randomUUID();
+       const saved=await posRequest('/api/pos/orders'+(edit?'/'+edit.id:''),{method:edit?'PUT':'POST',csrf:this.csrf,body:{
+         ...(edit?{revision:edit.revision}:{request_id:this.orderRequestId}),
+         customer:this.customer||null,note:this.note||null,
          lines:this.lines.map(l=>({sku:l.id,qty:l.qty,price_minor:l.price,discount:l.discount}))
        }});
-       this.startNew();this.savedOrderId=saved.id;this.orderSaving=false;this.closeDialog();
+       if(edit)this.restoreParkedDraft();
+       else this.startNew();
+       this.savedOrderId=saved.id;this.savedOrderEdited=Boolean(edit);this.orderSaving=false;this.closeDialog();
        await this.goPage('orders');
      }catch(err){
        if(await this.expireSession(err)){this.orderSaving=false;this.closeDialog();}
@@ -380,9 +420,15 @@ const app = Vue.createApp({
    clearOrder(){this.orderRequestId=null;this.lines=[];this.select(null);this.customer='';this.note='';},
    newOrder(){this.menu=false;if(this.lines.length||this.note||this.customer){this.openDialog('new');}else this.startNew();},
    startNew(){this.clearOrder();this.orderNumber=String(Number(this.orderNumber)+1).padStart(3,'0');this.mobile='catalog';},
-   remove(){const i=this.lines.findIndex(l=>l.id===this.selected);if(i<0)return;this.lines.splice(i,1);this.select(this.lines[Math.min(i,this.lines.length-1)]?.id??null);},
+   remove(id=this.selected){
+     const i=this.lines.findIndex(line=>line.id===id);
+     if(i<0)return;
+     this.lines.splice(i,1);
+     if(id===this.selected)this.select(this.lines[Math.min(i,this.lines.length-1)]?.id??null);
+   },
    press(key){
      const l=this.activeLine;if(!l)return;
+     if(l.locked){if(key==='−'||key==='Delete')this.remove();return;}
      if(this.modes.includes(key)){this.mode=key;this.buffer='';return;}
      if(key==='−'){this.remove();return;}
      if(key==='Delete'){

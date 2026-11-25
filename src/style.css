@@ -129,3 +129,13 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .pos-picker-option small{display:block;margin-top:2px}
 .pos-picker-active,.pos-picker-option:hover{background:var(--plum-pale);color:var(--plum-dark)}
 .pos-picker-selected{flex:none;color:var(--plum-dark);font-size:10px;border-radius:4px;background:#f2ebf2;padding:3px 5px}
+
+.cart-row{display:flex;align-items:stretch;border-bottom:1px solid #efedf2;border-left:3px solid transparent}
+.cart-row.selected{background:var(--plum-pale);border-left-color:var(--plum)}
+.cart-row .order-line{flex:1;min-width:0;border:0;background:transparent}
+.cart-row .cart-remove{flex:none;align-self:center;margin-left:6px;width:30px;min-width:30px;height:30px;padding:0;color:#aa2036}
+.cart-row .cart-remove:hover{background:#fff0f2;color:#8b1427}
+.cart-row .cart-remove svg{width:14px;height:14px}
+.cart-row .cart-remove+.order-line{padding-left:5px}
+.order-edit-actions{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;margin-top:8px}
+.order-edit-actions .pay-button{margin:0}
