@@ -119,10 +119,11 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .pos-picker-chevron{transform:rotate(-90deg)}
 .pos-picker-open .pos-picker-chevron{transform:rotate(90deg)}
 .pos-picker .pos-picker-clear{display:grid;min-width:26px;height:26px;padding:0}
-.pos-picker-panel{margin-top:5px;border:1px solid var(--border);border-radius:9px;background:#fff;box-shadow:0 5px 16px #38283d13;padding:4px}
-.pos-picker-panel[hidden]{display:none}
-.pos-picker-caption{color:var(--muted);font-size:11px;padding:5px 8px;font-weight:650}
-.pos-picker-panel ul{max-height:160px;overflow:auto;overscroll-behavior:contain}
+.pos-modal-shell{position:relative}
+#picker-overlays{position:absolute;inset:0;z-index:2;pointer-events:none}
+.pos-picker-panel{position:absolute;visibility:hidden;pointer-events:auto;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:9px;background:#fff;box-shadow:0 5px 16px #38283d13;padding:4px}
+.pos-picker-caption{flex:none;color:var(--muted);font-size:11px;padding:5px 8px;font-weight:650}
+.pos-picker-panel ul{min-height:0;max-height:160px;overflow:auto;overscroll-behavior:contain}
 .pos-picker-option{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 8px;border-radius:6px;cursor:pointer;line-height:1.2}
 .pos-picker-option>span:first-child{min-width:0;overflow-wrap:anywhere}
 .pos-picker-option strong{font-size:13px}

@@ -518,13 +518,56 @@ app.component('pos-search-select',{
  },
  mounted(){this.syncValidity();},
  updated(){this.syncValidity();},
+ beforeUnmount(){this.stopTracking();},
  methods:{
    syncValidity(){this.$refs.input.setCustomValidity(this.required&&!this.selected?'Select a '+this.label.toLowerCase()+' from the list.':'');},
    start(){
      if(this.disabled||this.open)return;
      this.open=true;this.query='';this.active=this.matches.indexOf(this.selected);
+     document.addEventListener('scroll',this.reposition,true);
+     document.addEventListener('pointerdown',this.closeOutside,true);
+     window.addEventListener('resize',this.reposition);
+     window.visualViewport?.addEventListener('resize',this.reposition);
+     window.visualViewport?.addEventListener('scroll',this.reposition);
+     this.$nextTick(this.reposition);
    },
-   close(){this.open=false;this.query='';this.active=-1;},
+   stopTracking(){
+     document.removeEventListener('scroll',this.reposition,true);
+     document.removeEventListener('pointerdown',this.closeOutside,true);
+     window.removeEventListener('resize',this.reposition);
+     window.visualViewport?.removeEventListener('resize',this.reposition);
+     window.visualViewport?.removeEventListener('scroll',this.reposition);
+   },
+   close(){
+     if(!this.open)return;
+     this.open=false;this.query='';this.active=-1;this.stopTracking();
+   },
+   contains(target){return target instanceof Node && (this.$el.contains(target)||this.$refs.panel?.contains(target));},
+   closeOutside(event){if(!this.contains(event.target))this.close();},
+   reposition(event){
+     const panel=this.$refs.panel;
+     if(!this.open||!panel||panel.contains(event?.target instanceof Node?event.target:null))return;
+     const control=this.$refs.control;
+     const anchor=control.getBoundingClientRect();
+     const host=panel.parentElement.getBoundingClientRect();
+     const body=control.closest('.pos-modal-body').getBoundingClientRect();
+     const viewport=window.visualViewport;
+     const top=Math.max(host.top+7,viewport?.offsetTop??0);
+     const bottom=Math.min(host.bottom-7,viewport?viewport.offsetTop+viewport.height:window.innerHeight);
+     if(anchor.bottom<=Math.max(body.top,top)||anchor.top>=Math.min(body.bottom,bottom)){this.close();return;}
+     const gap=5;
+     const below=Math.max(0,bottom-anchor.bottom-gap);
+     const above=Math.max(0,anchor.top-top-gap);
+     const opensUp=below<190&&above>below;
+     const room=opensUp?above:below;
+     if(room<34){this.close();return;}
+     Object.assign(panel.style,{
+       left:(anchor.left-host.left)+'px',width:anchor.width+'px',
+       top:opensUp?'':(anchor.bottom-host.top+gap)+'px',
+       bottom:opensUp?(host.bottom-anchor.top+gap)+'px':'',
+       maxHeight:Math.min(room,196)+'px',visibility:'visible',
+     });
+   },
    choose(option){this.$emit('update:modelValue',option.id);this.close();},
    clear(){
      this.$emit('update:modelValue','');
@@ -532,7 +575,13 @@ app.component('pos-search-select',{
    },
    move(index){
      this.active=index;
-     this.$nextTick(()=>this.$refs.list?.children[index]?.scrollIntoView?.({block:'nearest'}));
+     this.$nextTick(()=>{
+       const list=this.$refs.list, option=list?.children[index];
+       if(!option)return;
+       const bounds=list.getBoundingClientRect(), item=option.getBoundingClientRect();
+       if(item.top<bounds.top)list.scrollTop-=bounds.top-item.top;
+       else if(item.bottom>bounds.bottom)list.scrollTop+=item.bottom-bounds.bottom;
+     });
    },
    onKey(event){
      if(this.disabled||event.isComposing)return;
@@ -553,19 +602,17 @@ app.component('pos-search-select',{
  render(){
    const h=Vue.h, icon=Vue.resolveComponent('pos-icon');
    const label=this.label.replace(/ \(optional\)$/i,'');
-   return h('div',{class:'pos-picker',onFocusout:event=>{if(!event.currentTarget.contains(event.relatedTarget))this.close();}},[
-     h('div',{class:{'pos-picker-control':true,'pos-picker-open':this.open}},[
+   return h('div',{class:'pos-picker',onFocusout:event=>{if(!this.contains(event.relatedTarget))this.close();}},[
+     h('div',{ref:'control',class:{'pos-picker-control':true,'pos-picker-open':this.open}},[
        h(icon,{name:'search'}),
        h('input',{
          ref:'input',id:this.inputId,type:'text',role:'combobox',autocomplete:'off',spellcheck:false,
          disabled:this.disabled,required:this.required,
-         'aria-expanded':String(this.open),'aria-controls':this.listId,'aria-autocomplete':'list',
+         'aria-expanded':String(this.open),'aria-controls':this.open?this.listId:undefined,'aria-autocomplete':'list',
          'aria-activedescendant':this.open&&this.active>=0?this.listId+'-'+this.active:undefined,
          value:this.open?this.query:this.selected?.name??'',
          placeholder:this.open?'Type to search…':'Select '+label.toLowerCase()+(this.required?'':' (optional)'),
-         onFocus:this.start,onClick:this.start,onBlur:event=>{
-           if(!event.currentTarget.parentElement.parentElement.contains(event.relatedTarget))this.close();
-         },
+         onFocus:this.start,onClick:this.start,
          onInput:event=>{const text=event.target.value;this.start();this.query=text;this.move(this.matches.length?0:-1);},
          onKeydown:this.onKey,
        }),
@@ -575,7 +622,7 @@ app.component('pos-search-select',{
        },[h(icon,{name:'close'})]):null,
        h(icon,{name:'back',class:'pos-picker-chevron'}),
      ]),
-     h('div',{class:'pos-picker-panel',hidden:!this.open},[
+     this.open?h(Vue.Teleport,{to:'#picker-overlays'},[h('div',{ref:'panel',class:'pos-picker-panel'},[
        h('div',{class:'pos-picker-caption',role:'status'},this.matches.length?
          this.matches.length+' '+(this.matches.length===1?'option':'options'):
          this.options.length?'No matching options':'No options available'),
@@ -590,7 +637,7 @@ app.component('pos-search-select',{
            selected?h('span',{class:'pos-picker-selected','aria-hidden':'true'},'Selected'):null,
          ]);
        }):[]),
-     ]),
+     ])]):null,
    ]);
  },
 });

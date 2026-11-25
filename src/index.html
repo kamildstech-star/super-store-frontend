@@ -228,6 +228,7 @@
 
 <dialog id="action-dialog" class="pos-modal" :class="{ 'pos-modal-wide':actionDialog==='order' || actionDialog==='form' }" aria-labelledby="action-title" @cancel.prevent="closeActionDialog()">
   <div v-if="actionDialog" class="pos-modal-shell">
+    <div id="picker-overlays"></div>
     <header class="pos-modal-header">
       <div class="pos-modal-badge" :class="{ 'pos-modal-danger':actionDialog==='remove' }"><pos-icon :name="actionIcon"></pos-icon></div>
       <div class="pos-modal-heading">
