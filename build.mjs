@@ -1,0 +1,12 @@
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { compile } from '@vue/compiler-dom';
+const html = readFileSync('src/index.html','utf8');
+const template = html.match(/<div id="app" v-cloak>([\s\S]+)<\/div>\s*<noscript>/)[1];
+const code = compile(template,{mode:'function',whitespace:'condense'}).code;
+mkdirSync('dist',{recursive:true});
+writeFileSync('dist/index.html',html.replace(template,''));
+writeFileSync('dist/app.js','const registerRender = (() => {\n'+code+'\n})();\n'+readFileSync('src/app.js','utf8'));
+copyFileSync('node_modules/vue/dist/vue.runtime.global.prod.js','dist/vue.global.prod.js');
+copyFileSync('node_modules/vue/LICENSE','dist/vue-LICENSE.txt');
+execFileSync(process.execPath,['node_modules/tailwindcss/lib/cli.js','-i','src/style.css','-o','dist/style.css','--content','src/index.html,src/app.js','--minify'],{stdio:'inherit'});

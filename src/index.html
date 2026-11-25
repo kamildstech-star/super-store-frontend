@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Point of Sale · Register</title>
+<meta name="description" content="An interactive point-of-sale sale screen with a sample shop catalog.">
+<link rel="stylesheet" href="./style.css">
+<script defer src="./vue.global.prod.js"></script>
+<script defer src="./app.js"></script>
+</head>
+<body>
+<div id="app" v-cloak>
+<header class="topbar flex items-center justify-between">
+  <div class="flex items-center top-left">
+    <span class="wordmark" aria-label="Odoo-style demo">odoo</span>
+    <span class="divider"></span>
+    <span class="register-tab"><svg-icon name="register"></svg-icon> Register</span>
+    <button class="new-order" @click="newOrder" aria-label="New order" title="New order">+</button>
+  </div>
+  <div class="flex items-center top-right">
+    <span class="demo-label"><span></span> DEMO MODE</span>
+    <span class="cashier"><span class="avatar">MC</span><span class="cashier-name">Main Counter</span></span>
+    <div class="menu-wrap">
+      <button class="icon-button menu-button" aria-label="Register menu" :aria-expanded="menu" @click="menu=!menu"><svg-icon name="menu"></svg-icon></button>
+      <div v-if="menu" class="menu-panel">
+        <button @click="loadSample">Load sample order</button>
+        <button @click="newOrder">New empty order</button>
+        <button @click="openDialog('help')">Keyboard shortcuts</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="workspace" :class="{ 'show-order': mobile==='order' }">
+  <section class="order-panel" aria-label="Current order">
+    <div class="order-head flex items-center justify-between">
+      <div><span class="eyebrow">CURRENT ORDER</span><h1>Order #{{ orderNumber }}</h1></div>
+      <button class="icon-button trash" aria-label="Clear order" title="Clear order" :disabled="!lines.length" @click="openDialog('clear')"><svg-icon name="trash"></svg-icon></button>
+    </div>
+    <div class="order-lines" aria-label="Cart items">
+      <button v-for="line in lines" :key="line.id" class="order-line" :class="{ selected: line.id===selected }" :aria-pressed="line.id===selected" @click="select(line.id)">
+        <span><strong>{{ line.name }}</strong><small>{{ quantity(line.qty) }} {{ line.unit }} × {{ money(line.price) }}<template v-if="line.discount"> · {{ line.discount }}% off</template></small></span>
+        <strong>{{ money(lineTotal(line)) }}</strong>
+      </button>
+      <div v-if="!lines.length" class="empty-order">
+        <div class="empty-icon"><svg-icon name="basket"></svg-icon></div>
+        <strong>No products in this order</strong><span>Tap a product to start a sale.</span>
+      </div>
+    </div>
+    <div class="order-bottom">
+      <div class="totals flex items-center justify-between" aria-live="polite">
+        <div><strong>Total</strong><small>{{ lines.length }} {{ lines.length===1 ? 'line item' : 'line items' }}</small></div>
+        <strong class="total-value">{{ money(total) }}</strong>
+      </div>
+      <div class="order-tools grid grid-cols-2">
+        <button @click="openDialog('customer')"><svg-icon name="user"></svg-icon> {{ customer || 'Customer' }}</button>
+        <button @click="openDialog('note')"><svg-icon name="note"></svg-icon> {{ note ? 'Edit note' : 'Order note' }}</button>
+      </div>
+      <div class="numpad grid grid-cols-4" aria-label="Order keypad">
+        <button v-for="key in keys" :key="key" :class="{ 'mode-key':modes.includes(key), 'active-mode':mode===key, 'backspace':key==='Delete' }"
+          :disabled="!activeLine || (key==='.' && mode==='Qty' && activeLine.unit!=='kg')"
+          :aria-label="key==='Delete' ? 'Backspace' : key==='−' ? 'Remove selected item' : key"
+          :aria-pressed="modes.includes(key) ? mode===key : undefined" @click="press(key)">
+          <svg-icon v-if="key==='Delete'" name="backspace"></svg-icon><template v-else>{{key}}</template>
+        </button>
+      </div>
+      <button class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><svg-icon name="card"></svg-icon> Payment</button>
+    </div>
+  </section>
+
+  <section class="catalog" aria-label="Product catalog">
+    <div class="catalog-tools">
+      <div class="search-row flex items-center">
+        <label for="search" class="search-box flex items-center"><svg-icon name="search"></svg-icon><input id="search" type="search" placeholder="Search products…" v-model="query" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch">×</button></label>
+      </div>
+      <div class="category-row" aria-label="Product categories">
+        <button v-for="c in categories" :key="c.id" class="category" :class="{ 'category-active':category===c.id }" :style="{ '--cat':c.color }" :aria-pressed="category===c.id" @click="category=c.id">
+          <svg-icon :name="c.icon"></svg-icon> {{ c.name }}
+        </button>
+      </div>
+    </div>
+    <div class="catalog-content">
+      <div class="catalog-heading flex items-center justify-between"><h2>{{ categoryName }}</h2><span>{{ filtered.length }} {{ filtered.length===1 ? 'product' : 'products' }}</span></div>
+      <div v-if="filtered.length" class="product-grid">
+        <button v-for="p in filtered" :key="p.id" class="product" :aria-label="'Add '+p.name" @click="add(p)">
+          <div class="product-art" :style="{ '--tone':p.tone }">
+            <span class="unit-label">{{ p.unit }}</span>
+            <span class="product-illustration" v-html="art(p)"></span>
+            <span v-if="inCart(p.id)" class="in-cart" :aria-label="quantity(inCart(p.id))+' in order'">{{ quantity(inCart(p.id)) }}</span>
+          </div>
+          <div class="product-meta"><strong>{{ p.name }}</strong><span>{{ money(p.price) }} <small>/ {{ p.unit }}</small></span></div>
+        </button>
+      </div>
+      <div v-else class="no-results">
+        <svg-icon name="search"></svg-icon><strong>No products found</strong><span>Try another name, product code or category.</span>
+        <button @click="category='all'; clearSearch()">Show all products</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="mobile-nav" aria-label="Mobile register views">
+  <button :class="{active:mobile==='catalog'}" @click="mobile='catalog'"><svg-icon name="grid"></svg-icon> Products</button>
+  <button :class="{active:mobile==='order'}" @click="mobile='order'"><svg-icon name="basket"></svg-icon> Order · {{ money(total) }}</button>
+</nav>
+
+<dialog id="dialog" @close="dialogName=''">
+  <div class="dialog-body" v-if="dialogName">
+    <div class="flex items-center justify-between dialog-heading"><h2>{{ dialogTitles[dialogName] }}</h2><button class="icon-button" @click="closeDialog" aria-label="Close dialog">×</button></div>
+    <template v-if="dialogName==='payment'">
+      <p>This is a sale-screen demo. No payment will be processed or saved.</p>
+      <div class="payment-preview"><span>Order #{{orderNumber}} · {{lines.length}} {{lines.length===1?'line':'lines'}}</span><strong>{{money(total)}}</strong></div>
+      <div class="dialog-buttons"><button class="primary" @click="closeDialog">Back to register</button></div>
+    </template>
+    <template v-if="dialogName==='clear'">
+      <p>Remove all products from the current order?</p>
+      <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="clearOrder(); closeDialog()">Clear order</button></div>
+    </template>
+    <template v-if="dialogName==='new'">
+      <p>Start a new order? The current demo cart will be replaced.</p>
+      <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="startNew(); closeDialog()">New order</button></div>
+    </template>
+    <template v-if="dialogName==='customer'">
+      <p>Choose a sample customer for this order.</p>
+      <div class="customer-options"><button v-for="name in ['Walk-in Customer','Ayesha Khan','Ali Raza']" :key="name" @click="customer=name; closeDialog()"><svg-icon name="user"></svg-icon>{{name}}</button></div>
+      <div class="dialog-buttons" v-if="customer"><button @click="customer='';closeDialog()">Remove customer</button></div>
+    </template>
+    <template v-if="dialogName==='note'">
+      <label for="note">Note for this demo order</label><textarea id="note" v-model="draftNote" maxlength="160" rows="3" placeholder="e.g. Pack items separately"></textarea>
+      <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="note=draftNote.trim();closeDialog()">Save note</button></div>
+    </template>
+    <template v-if="dialogName==='help'">
+      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
+    </template>
+  </div>
+</dialog>
+</div>
+<noscript>This demo requires JavaScript to run.</noscript>
+</body>
+</html>
