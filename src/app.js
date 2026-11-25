@@ -1,25 +1,3 @@
-const svgPaths = {
-  orders:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/>',
-  products:'<path d="m3 7 9-4 9 4v10l-9 4-9-4V7Zm0 0 9 4 9-4m-9 4v10M7.5 5l9 4"/>',
-  categories:'<path d="M3 5h8l10 10-6 6L3 9V5Z"/><circle cx="7" cy="8" r="1"/>',
-  units:'<path d="m3 15 12-12 6 6L9 21l-6-6Zm6-6 2 2m1-5 2 2m-8 4 2 2"/>',
-  suppliers:'<path d="M2 5h13v12H2zm13 4h4l3 4v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',
-  logout:'<path d="M12 4H5v16h7m-2-8h11m-4-4 4 4-4 4"/>',
-  register:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>',
-  menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
-  trash:'<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/>',
-  basket:'<path d="m4 10 2 10h12l2-10H4Zm3 0 5-7 5 7m-7 4v3m4-3v3"/>',
-  user:'<circle cx="12" cy="8" r="3.3"/><path d="M5 20v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/>',
-  note:'<path d="M5 3h11l3 3v15H5V3Zm10 0v4h4M8 11h8m-8 4h8"/>',
-  backspace:'<path d="M2 12 8 5h13a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H8l-6-7Zm10-3 6 6m0-6-6 6"/>',
-  card:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M3 9h18m-14 6h4"/>',
-  search:'<circle cx="10.7" cy="10.7" r="6.2"/><path d="m15.3 15.3 4 4"/>',
-  grid:'<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
-  drink:'<path d="M7 9h10l-1 11H8L7 9Zm-2 0h14m-6 0 2-6h3"/>',
-  snack:'<path d="M5 4h14l-1 3v10l1 3H5l1-3V7L5 4Zm3 5h8m-8 6h8"/>',
-  pantry:'<path d="M5 8h14v12H5zM4 4h16v4H4zm6 8h4"/>',
-  produce:'<path d="M12 8c-3-3-9-1-8 4 1 5 4 9 8 7 4 2 7-2 8-7 1-5-5-7-8-4Zm0 0V4m0 3c1-3 3-4 5-4"/>'
-};
 const allProducts = {id:'all', name:'All products', icon:'grid', color:'#87657f'};
 const sampleOrder = [['MIN-01',2], ['CHP-05',1], ['APL-13',0.5]];
 const allowedShapes = new Set(['bottle','can','carton','bag','box','apple','banana','tomato','orange']);
@@ -121,7 +99,7 @@ const app = Vue.createApp({
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
    managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,managementSearch:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
-   orders:[],ordersCursor:null,ordersBusy:false,ordersError:'',orderDetail:null,orderDetailBusy:false,orderDetailRequest:0,
+   orders:[],ordersCursor:null,ordersBusy:false,ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    orderRequestId:null,orderSaving:false,orderSaveError:'',savedOrderId:null,searchStatus:'',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
    categoryName(){return this.categories.find(c=>c.id===this.category)?.name??'All products';},
@@ -130,7 +108,13 @@ const app = Vue.createApp({
    initials(){return this.user?.name.trim().split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase()||'U';},
    filtered(){const q=this.query.trim().toLowerCase();return this.catalog.filter(p=>(this.category==='all'||p.category===this.category)&&(!q||[p.name,p.id,p.unit,p.code,p.barcode].some(s=>s.toLowerCase().includes(q))));},
    activeLine(){return this.lines.find(l=>l.id===this.selected);},
-   total(){return this.lines.reduce((sum,l)=>sum+this.lineTotal(l),0);}
+   total(){return this.lines.reduce((sum,l)=>sum+this.lineTotal(l),0);},
+   displayedLines(){
+     return this.viewedOrder
+       ? this.viewedOrder.lines.map(l=>({id:l.sku,name:l.name,unit:l.unit,qty:l.qty,price:l.price_minor,discount:l.discount,savedTotal:l.total_minor}))
+       : this.lines;
+   },
+   displayedTotal(){return this.viewedOrder?.total_minor ?? this.total;}
  },
  mounted(){void this.restoreSession();window.addEventListener('keydown',this.keyboard);},
  beforeUnmount(){window.removeEventListener('keydown',this.keyboard);},
@@ -173,7 +157,7 @@ const app = Vue.createApp({
      this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
      this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';this.searchStatus='';
      this.clearOrder();this.orderNumber='001';this.orders=[];this.ordersCursor=null;this.ordersError='';
-     this.orderDetail=null;this.orderDetailRequest++;this.orderDetailBusy=false;this.savedOrderId=null;
+     this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;this.savedOrderId=null;
    },
    async expireSession(err){
      if(err.status!==401&&err.status!==419)return false;
@@ -182,7 +166,7 @@ const app = Vue.createApp({
      return true;
    },
    async goPage(page){
-     this.page=page;this.menu=false;this.profile=false;this.orderDetail=null;this.orderDetailRequest++;this.orderDetailBusy=false;
+     this.page=page;this.menu=false;this.profile=false;this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;
      this.managementForm=null;this.managementDelete=null;this.managementError='';this.managementNotice='';
      this.managementSearch='';
      if(page==='register'){await this.loadCatalog();return;}
@@ -203,10 +187,16 @@ const app = Vue.createApp({
    },
    async showOrder(id){
      const request=++this.orderDetailRequest;
-     this.orderDetail=null;this.orderDetailBusy=true;this.ordersError='';
+     this.viewedOrder=null;this.orderDetailBusy=true;this.ordersError='';
      try{
        const order=await posRequest('/api/pos/orders/'+id);
-       if(request===this.orderDetailRequest)this.orderDetail=order;
+       if(request===this.orderDetailRequest){
+         this.viewedOrder=order;
+         this.page='register';
+         this.profile=false;
+         this.menu=false;
+         this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
+       }
      }catch(err){if(!(await this.expireSession(err))&&request===this.orderDetailRequest)this.ordersError=err.message;}
      finally{if(request===this.orderDetailRequest)this.orderDetailBusy=false;}
    },
@@ -298,7 +288,7 @@ const app = Vue.createApp({
    },
    money(cents){return 'Rs. '+format.format(cents/100);},
    quantity(value){return new Intl.NumberFormat('en-PK',{maximumFractionDigits:3}).format(value);},
-   lineTotal(line){return Math.round(line.qty*line.price*(100-line.discount)/100);},
+   lineTotal(line){return line.savedTotal ?? Math.round(line.qty*line.price*(100-line.discount)/100);},
    inCart(id){return this.lines.find(l=>l.id===id)?.qty||0;},
    select(id){this.selected=id;this.mode='Qty';this.buffer='';},
    add(p){const line=this.lines.find(l=>l.id===p.id); if(line){line.qty=Math.min(9999,Math.round((line.qty+1)*1000)/1000);}else{this.lines.push(createLine(p));}this.select(p.id);},
@@ -343,15 +333,15 @@ const app = Vue.createApp({
    openDialog(name){this.orderSaveError='';this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
    closeDialog(){if(this.orderSaving)return;document.getElementById('dialog')?.close();},
    keyboard(e){
-     if(!this.user||this.page!=='register'||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||this.dialogName||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;
+     if(!this.user||this.page!=='register'||this.viewedOrder||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||this.dialogName||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;
      if(e.key==='/'){e.preventDefault();document.getElementById('search')?.focus();}
      else if(this.activeLine && /^[0-9.]$/.test(e.key)){e.preventDefault();this.press(e.key);}
      else if(this.activeLine && ['Backspace','Delete'].includes(e.key)){e.preventDefault();this.press(e.key==='Delete'?'−':'Delete');}
    }
  }
 });
-app.component('svg-icon',{
+app.component('pos-icon',{
  props:{name:String},
- render(){return Vue.h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':1.7,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':true,innerHTML:Object.hasOwn(svgPaths,this.name)?svgPaths[this.name]:''});}
+ render(){return Vue.h('svg',{viewBox:'0 0 24 24',fill:'currentColor','aria-hidden':true,focusable:'false',class:'remix-icon',innerHTML:Object.hasOwn(remixIcons,this.name)?remixIcons[this.name]:remixIcons.grid});}
 });
 app.mount('#app');

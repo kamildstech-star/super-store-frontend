@@ -11,11 +11,11 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173`. The dev server builds the app and forwards POS API requests to Laravel on port 8000. Restart it after source changes. Production should serve the built files over HTTPS with the API at the same origin.
+Open `http://127.0.0.1:4173`. The dev server builds the app and forwards POS API requests to Laravel on port 8000. Restart it after source changes. Production should serve the built files over HTTPS with the API at the same origin. UI icons use [Remix Icon](https://github.com/Remix-Design/RemixIcon), bundled at build time with no CDN dependency.
 
 ## Try
 
 - Use the top-bar icons to open Products, Categories, Units, and Suppliers. Create, search, and edit records; archive products or delete unused categories, units and suppliers.
 - Leave the product's **Internal code** blank to generate a random unused four-digit value; edit it later if needed. Barcode is separate.
 - Focus **Scan barcode** and use a keyboard-mode scanner set to send Enter, or enter a code manually and press Enter. A unique exact match adds to the cart even if another category is selected. Repeated scans increase quantity.
-- Open **Payment** and choose **Save order** to record the order. The **Orders** page lists saved orders and their line details. This does not collect payment or change inventory.
+- Open **Payment** and choose **Save order** to record the order. The **Orders** page lists saved orders. Select a row or its eye icon to open the order on the register in read-only mode without replacing the current cart. This does not collect payment or change inventory.
