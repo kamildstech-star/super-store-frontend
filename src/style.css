@@ -149,3 +149,14 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .pos-page-buttons button{font-size:12px;padding:6px 9px}
 .pos-page-range,.pos-page-buttons span{font-variant-numeric:tabular-nums}
 @media(max-width:500px){.pos-page-buttons{margin-left:0}.pos-pagination{justify-content:space-between}}
+
+.inventory-page .mg-table,.stock-history{min-width:630px}
+.inventory-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.inventory-tools label{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650}
+.inventory-tools label input[type=checkbox]{width:15px;min-height:15px;accent-color:var(--plum)}
+.stock-badge{display:inline-block;border-radius:6px;padding:4px 7px;font-size:11px;font-weight:700;background:#eee9f0;color:#564c59;white-space:nowrap}
+.stock-good{background:#e7f4eb;color:#205b39}
+.stock-low{background:#fff0e3;color:#853711}
+.stock-form{margin-top:14px}
+.stock-checkout-actions{flex-wrap:wrap}
+.product-stock{color:var(--muted)}
