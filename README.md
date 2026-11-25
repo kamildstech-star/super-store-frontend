@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173`. The dev server builds the app and forwards POS API requests to Laravel on port 8000. Restart it after source changes. Production should serve the built files over HTTPS with the API at the same origin. UI icons use [Remix Icon](https://github.com/Remix-Design/RemixIcon), bundled at build time with no CDN dependency.
+Open `http://127.0.0.1:4173`. The dev server builds the app and forwards POS API requests to Laravel on port 8000. Restart it after source changes. Production should serve the built files over HTTPS with the API at the same origin. UI icons use [Remix Icon](https://github.com/Remix-Design/RemixIcon), bundled from the local SVG subset in `src/vendor/remixicon`. No Remix Icon npm package or CDN is needed.
 
 ## Try
 
