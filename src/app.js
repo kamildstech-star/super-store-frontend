@@ -107,7 +107,7 @@ const app = Vue.createApp({
    managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,productImageFile:null,productImagePreview:'',productImageRemove:false,productImageError:'',optionsState:'idle',optionsRequest:0,listRows:[],listMeta:emptyPage(),listQuery:'',listSize:15,listBusy:false,listError:'',listTimer:null,listRequest:0,actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
    inventoryLow:false,inventoryNotice:'',inventoryItem:null,stockForm:null,stockError:'',
-   stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
+   registerStockNotice:'',registerStockTimer:null,stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale'},
    paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},paymentMethod:'',saleFinalized:false,
    ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
@@ -144,7 +144,7 @@ const app = Vue.createApp({
    document.addEventListener('focusin',this.closeOutsideHeader);
  },
  beforeUnmount(){
-   clearTimeout(this.listTimer);
+   clearTimeout(this.listTimer);clearTimeout(this.registerStockTimer);
    window.removeEventListener('keydown',this.keyboard);
    document.removeEventListener('pointerdown',this.closeOutsideHeader);
    document.removeEventListener('focusin',this.closeOutsideHeader);
@@ -202,6 +202,7 @@ const app = Vue.createApp({
    async goPage(page){
      if(this.editingOrder){if(page!=='register')this.requestEditExit(page);return;}
      this.closeActionDialog(true);
+     this.clearRegisterStockNotice();
      this.page=page;this.menu=false;this.profile=false;this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;
      this.managementForm=null;this.managementDelete=null;this.managementError='';this.managementNotice='';
      this.resetListing();this.ordersError='';
@@ -518,7 +519,39 @@ const app = Vue.createApp({
    lineTotal(line){return line.savedTotal ?? Math.round(line.qty*line.price*(100-line.discount)/100);},
    inCart(id){return this.lines.find(l=>l.id===id)?.qty||0;},
    select(id){this.selected=id;this.mode='Qty';this.buffer='';},
-   add(p){const line=this.lines.find(l=>l.id===p.id); if(line){line.qty=Math.min(9999,Math.round((line.qty+1)*1000)/1000);}else{this.lines.push(createLine(p));}this.select(p.id);},
+   clearRegisterStockNotice(){
+     clearTimeout(this.registerStockTimer);
+     this.registerStockNotice='';
+   },
+   warnRegisterStock(message){
+     clearTimeout(this.registerStockTimer);
+     this.registerStockNotice=message;
+     this.registerStockTimer=setTimeout(()=>{this.registerStockNotice='';},6500);
+   },
+   canSetRegisterQuantity(product,qty){
+     if(!product||product.stock===null){
+       this.warnRegisterStock('Stock could not be verified. Refresh the catalog before adding more.');
+       return false;
+     }
+     if(Math.round(qty*1000)>Math.round(product.stock*1000)){
+       this.warnRegisterStock('Insufficient stock for '+product.name+'. '+this.quantity(product.stock)+' '+product.unit+' available.');
+       return false;
+     }
+     return true;
+   },
+   add(p){
+     const line=this.lines.find(l=>l.id===p.id);
+     if(line?.qty>=9999)return false;
+     // A small remaining weight can still be sold without adding more than is on hand.
+     const firstQty=p.precision>0&&p.stock>0?Math.min(1,p.stock):1;
+     const qty=line?Math.min(9999,Math.round((line.qty+1)*1000)/1000):firstQty;
+     if(!this.canSetRegisterQuantity(p,qty))return false;
+     this.clearRegisterStockNotice();
+     if(line)line.qty=qty;
+     else this.lines.push(createLine(p,qty));
+     this.select(p.id);
+     return true;
+   },
    clearSearch(keepStatus=false){this.query='';if(!keepStatus)this.searchStatus='';this.$nextTick(()=>document.querySelector('#search')?.focus());},
    addMatch(){
      const query=this.query.trim().toLowerCase();
@@ -530,10 +563,24 @@ const app = Vue.createApp({
        document.querySelector('#search')?.select();
        return;
      }
-     this.add(matches[0]);this.searchStatus='Added '+matches[0].name+'.';this.clearSearch(true);
+     if(!this.add(matches[0])){
+       this.searchStatus='';
+       document.getElementById('search')?.select();
+       return;
+     }
+     this.searchStatus='Added '+matches[0].name+'.';this.clearSearch(true);
    },
-   loadSample(){this.clearOrder();this.lines=sampleOrder.flatMap(([sku,qty])=>{const p=this.catalog.find(p=>p.id===sku);return p?[createLine(p,p.precision===0?Math.ceil(qty):qty)]:[];});this.select(this.lines.at(-1)?.id??null);this.menu=false;},
-   clearOrder(){this.orderRequestId=null;this.lines=[];this.select(null);this.customer='';this.note='';},
+   loadSample(){
+     this.clearOrder();
+     this.lines=sampleOrder.flatMap(([sku,qty])=>{
+       const p=this.catalog.find(item=>item.id===sku);
+       if(!p)return [];
+       const count=p.precision===0?Math.ceil(qty):qty;
+       return this.canSetRegisterQuantity(p,count)?[createLine(p,count)]:[];
+     });
+     this.select(this.lines.at(-1)?.id??null);this.menu=false;
+   },
+   clearOrder(){this.clearRegisterStockNotice();this.orderRequestId=null;this.lines=[];this.select(null);this.customer='';this.note='';},
    newOrder(){this.menu=false;if(this.lines.length||this.note||this.customer){this.openDialog('new');}else this.startNew();},
    startNew(){this.clearOrder();this.orderNumber=String(Number(this.orderNumber)+1).padStart(3,'0');this.mobile='catalog';},
    remove(id=this.selected){
@@ -559,7 +606,13 @@ const app = Vue.createApp({
        this.buffer=next;
      }
      const n=Number(this.buffer)||0;
-     if(this.mode==='Qty'){if(n>0&&n<=9999)l.qty=n;}
+     if(this.mode==='Qty'){
+       const product=this.catalog.find(item=>item.id===l.id);
+       if(n>0&&n<=9999&&(n<=l.qty||this.canSetRegisterQuantity(product,n))){
+         l.qty=n;
+         this.clearRegisterStockNotice();
+       }
+     }
      else if(this.mode==='% Disc'){l.discount=Math.min(100,n);}
      else {l.price=Math.round(Math.min(999999,n)*100);}
    },
@@ -606,7 +659,7 @@ const app = Vue.createApp({
      if(area==='search'){
        // Do not take over the caret or selections while a cashier is typing.
        if(target.id==='search'&&(key==='ArrowLeft'||key==='ArrowRight')&&(target.value||event.shiftKey))return;
-       if(key==='ArrowUp')return;
+       if(key==='ArrowUp'){event.preventDefault();this.focusTopBar();return;}
        event.preventDefault();
        if(key==='ArrowDown')this.focusRegisterCategories();
        if(key==='ArrowLeft'){
@@ -665,6 +718,39 @@ const app = Vue.createApp({
      if(this.lines.length)this.focusRegisterArea('cart',items=>items[Math.min(index,items.length-1)]);
      else this.focusRegisterArea('search');
    },
+   focusTopBar(){
+     const items=this.registerTargets('topbar');
+     (items.find(item=>item.getAttribute('aria-current')==='page')??items[0])?.focus();
+   },
+   navigateTopBar(event){
+     const trigger=event.target?.closest?.('.topbar [data-key-target]');
+     const popup=event.target?.closest?.('.topbar .pos-dropdown');
+     if(!trigger&&!popup)return false;
+     const key=event.key;
+     event.preventDefault();
+     if(popup){
+       const keys=[...popup.querySelectorAll('button:not(:disabled)')];
+       const index=keys.indexOf(event.target);
+       if(key==='ArrowDown'||key==='ArrowUp'){
+         const offset=key==='ArrowDown'?1:-1;
+         keys[(index+offset+keys.length)%keys.length]?.focus();
+       }else popup.parentElement.querySelector('button[data-key-target]')?.focus();
+       return true;
+     }
+     if(key==='ArrowLeft'||key==='ArrowRight'){
+       const items=this.registerTargets('topbar');
+       const offset=key==='ArrowLeft'?-1:1;
+       items[(items.indexOf(trigger)+offset+items.length)%items.length]?.focus();
+     }else if(key==='ArrowDown'){
+       const popupId=trigger.getAttribute('aria-controls');
+       const first=trigger.getAttribute('aria-expanded')==='true'&&popupId
+         ?document.getElementById(popupId)?.querySelector('button:not(:disabled)'):null;
+       if(first)first.focus();
+       else if(this.page==='register'&&!this.viewedOrder)this.focusRegisterArea('search');
+       else document.querySelector('main .mg-page-head button:not(:disabled), main .saved-order-info button')?.focus();
+     }
+     return true;
+   },
    keyboard(e){
      if(e.key==='Escape'&&(this.menu||this.profile)){
        const trigger=document.querySelector('[data-header-popover="'+(this.menu?'menu':'profile')+'"] > button');
@@ -673,12 +759,13 @@ const app = Vue.createApp({
        e.preventDefault();
        return;
      }
-     if(e.target?.closest?.('[data-header-popover] .pos-dropdown'))return;
-     if(!this.user||this.page!=='register'||this.viewedOrder||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||e.target?.isContentEditable)return;
+     if(!this.user||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||e.target?.isContentEditable)return;
      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
-       if(e.target?.id==='search'||!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName))this.navigateRegister(e);
+       if(this.navigateTopBar(e))return;
+       if(this.page==='register'&&!this.viewedOrder&&(e.target?.id==='search'||!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)))this.navigateRegister(e);
        return;
      }
+     if(this.page!=='register'||this.viewedOrder||e.target?.closest?.('.topbar'))return;
      if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName))return;
      if(e.key==='/'){e.preventDefault();this.focusRegisterArea('search');}
      else if(this.activeLine && /^[0-9.]$/.test(e.key)){e.preventDefault();this.press(e.key);}

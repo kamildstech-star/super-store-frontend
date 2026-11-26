@@ -26,18 +26,18 @@
     </form>
   </section>
 </main>
-<header v-if="user" class="topbar">
+<header v-if="user" class="topbar" data-register-keys="topbar">
   <nav class="top-pages" aria-label="POS pages">
-    <button v-for="item in pages" :key="item.id" class="pos-nav-button" type="button"
+    <button v-for="item in pages" :key="item.id" data-key-target class="pos-nav-button" type="button"
       :title="item.label" :aria-label="item.label" :aria-current="page===item.id?'page':undefined"
       :disabled="managementBusy" @click="goPage(item.id)">
       <pos-icon :name="item.icon || item.id"></pos-icon>
     </button>
   </nav>
   <div class="top-actions">
-    <button v-if="page==='register' && !viewedOrder && !editingOrder" class="new-order" @click="newOrder" aria-label="New order" title="New order"><pos-icon name="add"></pos-icon></button>
+    <button v-if="page==='register' && !viewedOrder && !editingOrder" data-key-target class="new-order" @click="newOrder" aria-label="New order" title="New order"><pos-icon name="add"></pos-icon></button>
     <div v-if="page==='register' && !viewedOrder && !editingOrder" class="menu-wrap" data-header-popover="menu">
-      <button class="icon-button" type="button" aria-label="Register menu" title="Register menu" aria-controls="register-dropdown" :aria-expanded="menu" @click="menu=!menu; profile=false"><pos-icon name="menu"></pos-icon></button>
+      <button data-key-target class="icon-button" type="button" aria-label="Register menu" title="Register menu" aria-controls="register-dropdown" :aria-expanded="menu" @click="menu=!menu; profile=false"><pos-icon name="menu"></pos-icon></button>
       <div id="register-dropdown" v-show="menu" class="menu-panel pos-dropdown" role="group" aria-label="Register shortcuts">
         <span class="pos-dropdown-label">Register shortcuts</span>
         <button type="button" @click="loadSample" :disabled="catalogState!=='ready'"><pos-icon name="orders"></pos-icon> Load sample order</button>
@@ -46,13 +46,13 @@
       </div>
     </div>
     <div class="menu-wrap" data-header-popover="profile">
-      <button class="avatar profile-toggle" type="button" aria-controls="profile-dropdown" aria-label="Profile" title="Profile" :aria-expanded="profile" @click="profile=!profile; menu=false"><pos-icon name="user"></pos-icon></button>
+      <button data-key-target class="avatar profile-toggle" type="button" aria-controls="profile-dropdown" aria-label="Profile" title="Profile" :aria-expanded="profile" @click="profile=!profile; menu=false"><pos-icon name="user"></pos-icon></button>
       <div id="profile-dropdown" v-show="profile" class="menu-panel pos-dropdown profile-menu" role="group" aria-label="Signed-in profile">
         <span class="pos-dropdown-label">Signed in as</span>
         <span class="profile-details"><strong>{{user.name}}</strong><small>{{user.email}}</small></span>
       </div>
     </div>
-    <button class="pos-nav-button pos-logout" type="button" aria-label="Log out" title="Log out" @click="logout" :disabled="authBusy"><pos-icon name="logout"></pos-icon></button>
+    <button data-key-target class="pos-nav-button pos-logout" type="button" aria-label="Log out" title="Log out" @click="logout" :disabled="authBusy"><pos-icon name="logout"></pos-icon></button>
   </div>
 </header>
 <p v-if="user && authError" class="mg-error" role="alert">{{authError}}</p>
@@ -162,6 +162,7 @@
 </main>
 
 <main v-if="user && page==='register'" class="workspace" :class="{ 'show-order': mobile==='order' || viewedOrder, 'view-saved-order': viewedOrder }">
+  <p class="register-stock-notice" role="alert" aria-atomic="true"><span v-if="registerStockNotice">{{registerStockNotice}}</span></p>
   <section class="order-panel" :aria-label="viewedOrder ? 'Saved order items' : 'Current order'">
     <div class="order-head flex items-center justify-between">
       <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : editingOrder ? 'EDITING SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{saleOrderRef}}</h1></div>
@@ -253,7 +254,7 @@
             <span v-else class="product-illustration" v-html="art(p)"></span>
             <span v-if="inCart(p.id)" class="in-cart" :aria-label="quantity(inCart(p.id))+' in order'">{{ quantity(inCart(p.id)) }}</span>
           </div>
-          <div class="product-meta"><strong>{{ p.name }}</strong><small v-if="p.stock!==null" class="product-stock">{{quantity(p.stock)}} {{p.unit}} in stock</small><span>{{ money(p.price) }} <small>/ {{ p.unit }}<template v-if="p.code"> · {{p.code}}</template></small></span></div>
+          <div class="product-meta"><strong>{{ p.name }}</strong><small v-if="p.stock!==null" class="product-stock" :class="{'product-out-of-stock':p.stock===0}">{{p.stock===0?'Out of stock':quantity(p.stock)+' '+p.unit+' in stock'}}</small><span>{{ money(p.price) }} <small>/ {{ p.unit }}<template v-if="p.code"> · {{p.code}}</template></small></span></div>
         </button>
       </div>
       <div v-else class="no-results">
@@ -453,7 +454,7 @@
       <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="note=draftNote.trim();closeDialog()">Save note</button></div>
     </template>
     <template v-if="dialogName==='help'">
-      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match or activate the focused button</dd><dt>Arrow keys</dt><dd>Move between search, categories and products. From the left edge of products, press Left for the cart. Down from the last cart line opens keypad focus.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
+      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match or activate the focused button</dd><dt>Arrow keys</dt><dd>Up from Search reaches the top bar. Left and Right move across its icons; Down returns to Search. Move between search, categories and products. From the left edge of products, press Left for the cart. Down from the last cart line opens keypad focus.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
     </template>
   </div>
 </dialog>
