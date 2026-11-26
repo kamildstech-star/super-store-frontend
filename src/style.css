@@ -175,3 +175,8 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .product-list-thumbnail img{width:100%;height:100%;object-fit:cover}
 .product-list-thumbnail svg{width:17px;height:17px}
 [data-register-keys] button[data-key-target]:focus-visible{outline:2px solid var(--plum);outline-offset:-3px}
+
+[data-register-keys="products"] .product:focus-visible{position:relative;isolation:isolate;outline:none}
+.product:focus-visible::after{content:"";position:absolute;inset:0;z-index:3;border:3px solid var(--plum);border-radius:inherit;box-shadow:inset 0 0 0 1px #fff;pointer-events:none}
+.search-box:has(input:focus-visible){outline:2px solid var(--plum);outline-offset:2px}
+@media(forced-colors:active){.product:focus-visible::after{border-color:Highlight}}

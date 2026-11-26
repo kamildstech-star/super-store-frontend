@@ -169,8 +169,8 @@
     </div>
     <div class="order-lines" aria-label="Cart items" data-register-keys="cart">
       <div v-for="line in displayedLines" :key="line.id" class="cart-row" :class="{ selected:!viewedOrder && line.id===selected }">
-        <button v-if="!viewedOrder" type="button" class="icon-button cart-remove" @click="remove(line.id)"
-          :aria-label="'Remove '+line.name+' from order'" :title="'Remove '+line.name"><pos-icon name="close"></pos-icon></button>
+        <button v-if="!viewedOrder" type="button" class="icon-button cart-remove" @click="removeFromCart(line.id)"
+          :aria-label="'Remove '+line.name+' from order'" :title="'Remove '+line.name"><pos-icon name="trash"></pos-icon></button>
         <component :is="viewedOrder ? 'div' : 'button'" class="order-line" :type="viewedOrder ? undefined : 'button'"
           :aria-pressed="viewedOrder ? undefined : line.id===selected" :data-key-target="viewedOrder ? undefined : ''"
           @focus="!viewedOrder && selected!==line.id && select(line.id)" @click="!viewedOrder && select(line.id)">
@@ -230,13 +230,13 @@
   </section>
   <section v-else class="catalog" aria-label="Product catalog">
     <div class="catalog-tools">
-      <div class="search-row flex items-center">
-        <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch" @keydown.down.prevent="focusProducts"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
-        <button type="button" class="secondary scan-focus" @click="clearSearch()" title="Focus the search box, then scan with an Enter-suffix scanner"><pos-icon name="barcode"></pos-icon> Scan barcode</button>
+      <div class="search-row flex items-center" data-register-keys="search">
+        <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" data-key-target type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
+        <button type="button" class="secondary scan-focus" data-key-target @click="clearSearch()" title="Focus the search box, then scan with an Enter-suffix scanner"><pos-icon name="barcode"></pos-icon> Scan barcode</button>
       </div>
       <small v-if="searchStatus" class="scan-status" role="status">{{searchStatus}}</small>
-      <div class="category-row" aria-label="Product categories">
-        <button v-for="c in categories" :key="c.id" class="category" :class="{ 'category-active':category===c.id }" :style="{ '--cat':c.color }" :aria-pressed="category===c.id" @click="category=c.id">
+      <div class="category-row" role="group" aria-label="Product categories" data-register-keys="categories">
+        <button v-for="c in categories" :key="c.id" class="category" data-key-target :class="{ 'category-active':category===c.id }" :style="{ '--cat':c.color }" :aria-pressed="category===c.id" @click="category=c.id">
           <pos-icon :name="c.icon"></pos-icon> {{ c.name }}
         </button>
       </div>
@@ -453,7 +453,7 @@
       <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="note=draftNote.trim();closeDialog()">Save note</button></div>
     </template>
     <template v-if="dialogName==='help'">
-      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match or activate the focused button</dd><dt>Arrow keys</dt><dd>Move through products, cart lines and keypad. From the left edge of products, press Left to jump to the keypad.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
+      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match or activate the focused button</dd><dt>Arrow keys</dt><dd>Move between search, categories and products. From the left edge of products, press Left for the cart. Down from the last cart line opens keypad focus.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
     </template>
   </div>
 </dialog>
