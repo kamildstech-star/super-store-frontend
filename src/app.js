@@ -113,7 +113,7 @@ const app = Vue.createApp({
    inventoryLow:false,inventoryStatus:'',inventoryNotice:'',inventoryItem:null,stockForm:null,stockError:'',
    registerStockNotice:'',registerStockTimer:null,stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale'},
-   paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},paymentMethod:'',cashReceived:'',saleFinalized:false,receiptOrder:null,pendingSubmission:null,submissionNotice:'',
+   paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},cashReceived:'',saleFinalized:false,receiptOrder:null,pendingSubmission:null,submissionNotice:'',
    ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    cartScope:null,cartReady:false,cartNotice:'',cartStorageError:false,scanCode:'',scanStatus:'',scanFailed:false,
    orderRequestId:null,orderSaving:false,orderSaveError:'',savedOrderId:null,savedOrderEdited:false,editingOrder:null,parkedDraft:null,editExitPage:'orders',searchStatus:'',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
@@ -133,7 +133,7 @@ const app = Vue.createApp({
      const minor=Number(rupees)*100+Number(paisa.padEnd(2,'0'));
      return Number.isSafeInteger(minor)&&minor<=maxCashMinor?minor:null;
    },
-   canFinalize(){return Boolean(this.paymentMethod)&&(this.paymentMethod!=='cash'||(this.cashMinor!==null&&this.cashMinor>=this.total));},
+   canFinalize(){return this.cashMinor!==null&&this.cashMinor>=this.total;},
    actionTitle(){
      if(this.actionDialog==='stock')return 'Update stock · '+this.inventoryItem?.name;
      if(this.actionDialog==='stock-history')return 'Stock history · '+this.inventoryItem?.name;
@@ -448,7 +448,7 @@ const app = Vue.createApp({
      const edit=this.editingOrder;
      const body={
        ...(edit?{revision:edit.revision,[finalize?'checkout_id':'update_id']:crypto.randomUUID()}:{request_id:this.orderRequestId??=crypto.randomUUID()}),
-       ...(finalize?{payment_method:this.paymentMethod,...(this.paymentMethod==='cash'?{cash_received_minor:this.cashMinor}:{})}:{}),
+       ...(finalize?{payment_method:'cash',cash_received_minor:this.cashMinor}:{}),
        customer:this.customer||null,note:this.note||null,
        lines:this.lines.map(l=>({sku:l.id,qty:l.qty,price_minor:l.price,discount:l.discount})),
      };
@@ -767,7 +767,7 @@ const app = Vue.createApp({
      else if(this.mode==='% Disc'){l.discount=Math.min(100,n);}
      else {l.price=Math.round(Math.min(999999,n)*100);}
    },
-   openDialog(name){this.orderSaveError='';if(['payment','update'].includes(name)){this.paymentMethod='';this.cashReceived='';}this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
+   openDialog(name){this.orderSaveError='';if(['payment','update'].includes(name))this.cashReceived='';this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
    closeDialog(){if(this.orderSaving)return;document.getElementById('dialog')?.close();},
    closeOutsideHeader(event){
      if(this.menu&&!event.target.closest?.('[data-header-popover="menu"]'))this.menu=false;

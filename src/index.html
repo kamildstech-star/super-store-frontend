@@ -460,18 +460,12 @@
       <div class="dialog-buttons"><button type="button" @click="closeDialog" :disabled="orderSaving">Back</button><button type="button" class="primary" @click="saveOrder(false)" :disabled="orderSaving">{{orderSaving?'Parking…':'Park order'}}</button></div>
     </template>
     <template v-if="dialogName==='payment' || dialogName==='update'">
-      <p>Save a draft without changing stock, or record payment received and finalize the sale.</p>
+      <p>Save a draft without changing stock, or record the cash received and finalize the sale.</p>
       <div class="payment-preview"><span>Order {{saleOrderRef}} · {{lines.length}} {{lines.length===1?'line':'lines'}}</span><strong>{{money(total)}}</strong></div>
       <p v-if="orderSaveError" class="mg-error" role="alert">{{orderSaveError}}</p>
-      <label class="mg-field">Payment method
-        <select v-model="paymentMethod" :disabled="orderSaving">
-          <option value="">Choose a method to finalize…</option>
-          <option v-for="(label,method) in paymentMethods" :key="method" :value="method">{{label}}</option>
-        </select>
-      </label>
-      <div v-if="paymentMethod==='cash'" class="cash-tender">
+      <div class="cash-tender">
         <label class="mg-field" for="cash-received">Cash received (PKR)
-          <input id="cash-received" v-model="cashReceived" inputmode="decimal" maxlength="18" placeholder="0.00" :disabled="orderSaving" aria-describedby="cash-feedback">
+          <input id="cash-received" autofocus v-model="cashReceived" inputmode="decimal" maxlength="18" placeholder="0.00" :disabled="orderSaving" aria-describedby="cash-feedback">
         </label>
         <button type="button" class="secondary" @click="cashReceived=(total/100).toFixed(2)" :disabled="orderSaving">Exact amount</button>
         <p id="cash-feedback" role="status">
@@ -480,7 +474,6 @@
           <template v-else-if="cashReceived">Enter a valid amount with up to two decimal places.</template>
         </p>
       </div>
-      <p v-if="paymentMethod && paymentMethod!=='cash'">Confirm payment outside the POS first. This records the method and does not charge a card or initiate a transfer.</p>
       <div class="dialog-buttons stock-checkout-actions">
         <button @click="closeDialog" :disabled="orderSaving">Back</button>
         <button @click="saveOrder(false)" :disabled="orderSaving">{{editingOrder?'Save changes':'Save draft'}}</button>
