@@ -44,12 +44,13 @@ function art({shape,ink:c,label:l}) {
 const format = new Intl.NumberFormat('en-PK',{minimumFractionDigits:2,maximumFractionDigits:2});
 const createLine = (p,qty=1)=>({...p,qty,discount:0});
 const manager = {
- products:{title:'Products',single:'Product',columns:['Internal code','Name','Barcode','Price','Status'],
+ products:{title:'Products',single:'Product',columns:['Internal code','Name','Barcode','Retail Price','Sale Price','Status'],
    fields:[
      {key:'name',label:'Name'},
      {key:'internal_code',label:'Internal code (4 digits)',code:true},
      {key:'barcode',label:'Barcode (optional)'},
-     {key:'price',label:'Price (PKR)',type:'number',min:0,max:999999.99,step:0.01},
+     {key:'retailPrice',label:'Retail Price (PKR)',hint:'Regular shelf price.',type:'number',min:0,max:999999.99,step:0.01},
+     {key:'salePrice',label:'Sale Price (PKR)',hint:'Default price charged at the POS.',type:'number',min:0,max:999999.99,step:0.01},
      {key:'category_id',label:'Category',options:'categories'},
      {key:'unit_id',label:'Unit',options:'units'},
      {key:'supplier_id',label:'Supplier (optional)',options:'suppliers',optional:true},
@@ -391,8 +392,10 @@ const app = Vue.createApp({
    orderDate(value){return new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value));},
    managementStart(row=null){
      this.managementError='';this.managementNotice='';this.managementDelete=null;
-     this.managementForm=row?{...row,price:row.price_minor===undefined?'':(row.price_minor/100).toFixed(2)}:
-       {name:'',internal_code:'',barcode:'',price:'',category_id:'',unit_id:'',supplier_id:'',
+     this.managementForm=row?{...row,
+       retailPrice:row.price_minor===undefined?'':((row.retail_price_minor??row.price_minor)/100).toFixed(2),
+       salePrice:row.price_minor===undefined?'':(row.price_minor/100).toFixed(2)}:
+       {name:'',internal_code:'',barcode:'',retailPrice:'',salePrice:'',category_id:'',unit_id:'',supplier_id:'',
         is_active:true,slug:'',code:'',quantity_precision:0,email:'',phone:''};
      this.openActionDialog('form');
    },
@@ -408,7 +411,8 @@ const app = Vue.createApp({
      if(!row)return [];
      return this.manage.fields.map(field=>{
        const raw=row[field.key];
-       const value=field.key==='price'?this.money(row.price_minor):
+       const value=field.key==='retailPrice'?this.money(row.retail_price_minor??row.price_minor):
+         field.key==='salePrice'?this.money(row.price_minor):
          field.type==='checkbox'?(raw?'Yes':'No'):
          field.options?this.managementData[field.options].find(option=>option.id===raw)?.name:raw;
        return {label:field.label.replace(/ \(.*\)$/, ''),value:value===null||value===undefined||value===''?'—':value};
@@ -422,7 +426,8 @@ const app = Vue.createApp({
      const body={name:form.name.trim()};
      if(resource==='products')Object.assign(body,{
        internal_code:form.internal_code?.trim()||null,barcode:form.barcode?.trim()||null,
-       price_minor:Math.round(Number(form.price)*100),category_id:Number(form.category_id),unit_id:Number(form.unit_id),
+       retail_price_minor:Math.round(Number(form.retailPrice)*100),
+       price_minor:Math.round(Number(form.salePrice)*100),category_id:Number(form.category_id),unit_id:Number(form.unit_id),
        supplier_id:form.supplier_id?Number(form.supplier_id):null,is_active:Boolean(form.is_active),
      });
      if(resource==='categories'&&!form.id)body.slug=form.slug.trim().toLowerCase();
@@ -450,7 +455,7 @@ const app = Vue.createApp({
      finally{this.managementBusy=false;}
    },
    rowValues(row){
-     if(this.page==='products')return [row.internal_code,row.name,row.barcode||'—',this.money(row.price_minor),row.is_active?'Active':'Archived'];
+     if(this.page==='products')return [row.internal_code,row.name,row.barcode||'—',this.money(row.retail_price_minor??row.price_minor),this.money(row.price_minor),row.is_active?'Active':'Archived'];
      if(this.page==='categories')return [row.name,row.slug];
      if(this.page==='units')return [row.name,row.code,row.quantity_precision];
      return [row.name,row.email||'—',row.phone||'—'];

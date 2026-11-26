@@ -328,6 +328,7 @@
          :pattern="field.code?'[0-9]{4}':field.keyFormat?'[a-z0-9]+(?:-[a-z0-9]+)*':undefined"
          :placeholder="field.code&&!managementForm.id?'Leave blank to generate':undefined">
         <small v-if="field.code && !managementForm.id">Leave blank and Laravel assigns an unused 4-digit code.</small>
+        <small v-if="field.hint">{{field.hint}}</small>
       </div>
     </div>
       </div>
