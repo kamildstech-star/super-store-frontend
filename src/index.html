@@ -96,6 +96,76 @@
   </section>
 </main>
 
+<main v-if="user && page==='reports'" class="management-page sales-report">
+  <div class="mg-page-head">
+    <div><span class="eyebrow">POINT OF SALE / REPORTS</span><h1>Daily Sales Report</h1><p class="report-caption">Finalized sales only · Pakistan time (PKT)</p></div>
+    <button type="button" class="secondary" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
+  </div>
+  <form class="report-filters mg-field-grid" aria-label="Sales report filters" @submit.prevent="applyReport">
+    <label class="mg-field">Date range
+      <select aria-label="Date range" v-model="reportForm.period" @change="reportPeriodChanged">
+        <option value="today">Today</option><option value="yesterday">Yesterday</option><option value="custom">Custom range</option>
+      </select>
+    </label>
+    <template v-if="reportForm.period==='custom'">
+      <label class="mg-field">From date<input type="date" v-model="reportForm.from" required></label>
+      <label class="mg-field">To date<input type="date" v-model="reportForm.to" :min="reportForm.from||undefined" required></label>
+    </template>
+    <label class="mg-field">Cashier
+      <select aria-label="Cashier" v-model="reportForm.cashier">
+        <option value="">All cashiers</option>
+        <option v-if="reportForm.cashier && !report?.cashiers.some(c=>String(c.id)===reportForm.cashier)" :value="reportForm.cashier">Cashier #{{reportForm.cashier}} (no sales in range)</option>
+        <option v-for="cashier in report?.cashiers??[]" :key="cashier.id" :value="String(cashier.id)">{{cashier.name}}</option>
+      </select>
+    </label>
+    <button type="submit" class="primary" :disabled="listBusy">Apply filters</button>
+  </form>
+  <p v-if="ordersError || listError" class="mg-error" role="alert">{{ordersError || listError}}</p>
+  <p v-if="orderDetailBusy && !actionDialog" role="status">Loading order…</p>
+  <p v-if="listBusy" class="report-caption" role="status">Loading sales report…</p>
+  <template v-else-if="report && !listError">
+    <p class="report-caption" role="status">Showing {{report.range.from}}{{report.range.from!==report.range.to?' to '+report.range.to:''}} (PKT){{reportApplied.cashier?' · Cashier filter active':''}}</p>
+    <dl class="report-metrics" aria-label="Sales summary">
+      <div><dt>Gross sales</dt><dd>{{reportMoney(report.summary.gross_minor)}}</dd></div>
+      <div><dt>Discounts</dt><dd>{{reportMoney(report.summary.discount_minor)}}</dd></div>
+      <div class="report-primary"><dt>Sales after discounts</dt><dd>{{reportMoney(report.summary.sales_after_discount_minor)}}</dd></div>
+      <div><dt>Finalized orders</dt><dd>{{report.summary.order_count}}</dd></div>
+      <div><dt>Refunds</dt><dd class="report-unavailable">Not tracked yet</dd></div>
+      <div><dt>Net sales after refunds</dt><dd class="report-unavailable">Not available yet</dd></div>
+    </dl>
+    <section class="report-methods" aria-labelledby="report-methods-heading">
+      <h2 id="report-methods-heading">Payment breakdown</h2>
+      <dl v-if="report.payments.length" class="report-payments">
+        <div v-for="payment in report.payments" :key="payment.method">
+          <dt>{{methodLabel(payment.method)}} <small>· {{payment.order_count}} {{payment.order_count===1?'order':'orders'}}</small></dt>
+          <dd>{{reportMoney(payment.total_minor)}}</dd>
+        </div>
+      </dl>
+      <p v-else class="report-caption">No payments in this selection.</p>
+    </section>
+    <section class="mg-list" aria-label="Finalized sales">
+      <div class="mg-table-wrap"><table class="mg-table">
+        <thead><tr><th scope="col">Order</th><th scope="col">Finalized (PKT)</th><th scope="col">Cashier</th><th scope="col">Customer</th><th scope="col">Items</th><th scope="col">Payment</th><th scope="col">Total</th><th scope="col">Actions</th></tr></thead>
+        <tbody>
+          <tr v-for="order in listRows" :key="order.id">
+            <td><button type="button" class="order-ref-link" @click="showOrder(order.id,true)">{{orderRef(order.id)}}</button></td>
+            <td>{{receiptDate(order.finalized_at)}}</td><td>{{order.cashier||'Not recorded'}}</td><td>{{order.customer||'Walk-in'}}</td>
+            <td>{{order.line_count}}</td><td>{{methodLabel(order.payment_method)}}</td><td>{{reportMoney(order.total_minor)}}</td>
+            <td class="mg-row-tools">
+              <button type="button" class="secondary action-icon" @click="showOrder(order.id,true)"
+                :aria-label="'View order '+orderRef(order.id)" title="View order"><pos-icon name="view"></pos-icon></button>
+              <button type="button" class="secondary action-icon" @click="showOrder(order.id,false,false,true)"
+                :aria-label="'Receipt for order '+orderRef(order.id)" title="Receipt"><pos-icon name="orders"></pos-icon></button>
+            </td>
+          </tr>
+          <tr v-if="!listRows.length"><td colspan="8">No finalized sales match these filters.</td></tr>
+        </tbody>
+      </table></div>
+      <pos-table-pagination :meta="listMeta" :size="listSize" :busy="listBusy" @page="loadListing" @size="listingSize"></pos-table-pagination>
+    </section>
+  </template>
+</main>
+
 <main v-if="user && page==='inventory'" class="management-page inventory-page">
   <div class="mg-page-head">
     <div><span class="eyebrow">POINT OF SALE</span><h1>Inventory</h1></div>

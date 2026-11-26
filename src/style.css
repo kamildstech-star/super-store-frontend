@@ -236,3 +236,19 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
  .receipt-items tr,.receipt-totals{break-inside:avoid}
  .receipt-items small{color:#000}
 }
+
+.sales-report{display:flex;flex-direction:column;gap:11px}
+.report-caption{margin:3px 0;font-size:13px;color:#665b6a}
+.report-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin:0;background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px}
+.report-filters .mg-field{flex:1 0 148px;margin:0}
+.report-filters .primary{min-height:40px}
+.report-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(145px,100%),1fr));gap:8px;margin:0}
+.report-metrics>div,.report-methods{border:1px solid var(--border);background:#fff;border-radius:8px;padding:10px 12px}
+.report-metrics dt,.report-payments dt{font-size:13px;color:#665b6a;font-weight:650}
+.report-metrics dd{margin:5px 0 0;font-size:18px;font-weight:800;overflow-wrap:anywhere}
+.report-metrics .report-primary{background:#f4edf5;border-color:#e3d5e6}
+.report-metrics .report-unavailable{font-size:13px;color:#665b6a;font-weight:650}
+.report-methods h2{margin:0;font-size:15px;font-weight:800}
+.report-payments{display:flex;flex-wrap:wrap;gap:8px 22px;margin:8px 0 0}
+.report-payments dd{margin:2px 0 0;font-weight:750}
+.sales-report .mg-table{min-width:750px}

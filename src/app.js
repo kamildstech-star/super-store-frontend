@@ -70,6 +70,8 @@ const manager = {
    {key:'phone',label:'Phone (optional)',type:'tel',optional:true}]},
 };
 const emptyManagement=()=>({categories:[],units:[],suppliers:[]});
+const emptyReportFilters=()=>({period:'today',from:'',to:'',cashier:''});
+const reportInteger=new Intl.NumberFormat('en-PK',{maximumFractionDigits:0});
 const emptyPage=()=>({page:1,last_page:1,total:0,from:null,to:null});
 
 async function posRequest(path,{method='GET',body,csrf}={}) {
@@ -99,7 +101,7 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
 }
 
 const pages = [{id:'register',label:'Register'}, {id:'orders',label:'Orders'}, {id:'inventory',label:'Inventory',icon:'archive'},
-  ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
+  {id:'reports',label:'Reports',icon:'grid'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
 const maxCashMinor=9000000000000000;
 const snapshotLines=lines=>lines.map(({id,name,unit,precision,qty,price,discount})=>({id,name,unit,precision,qty,price,discount}));
 const receiptTime=new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Karachi'});
@@ -110,6 +112,7 @@ const app = Vue.createApp({
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
    managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,productImageFile:null,productImagePreview:'',productImageRemove:false,productImageError:'',optionsState:'idle',optionsRequest:0,listRows:[],listMeta:emptyPage(),listQuery:'',listSize:15,listBusy:false,listError:'',listTimer:null,listRequest:0,actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
+   reportForm:emptyReportFilters(),reportApplied:emptyReportFilters(),report:null,
    inventoryLow:false,inventoryStatus:'',inventoryNotice:'',inventoryItem:null,stockForm:null,stockError:'',
    registerStockNotice:'',registerStockTimer:null,stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale'},
@@ -279,6 +282,7 @@ const app = Vue.createApp({
    resetListing(){
      clearTimeout(this.listTimer);this.listRequest++;this.optionsRequest++;
      this.listRows=[];this.listMeta=emptyPage();this.listQuery='';this.listBusy=false;this.listError='';
+     this.reportForm=emptyReportFilters();this.reportApplied=emptyReportFilters();this.report=null;
      this.managementData=emptyManagement();this.optionsState='idle';this.inventoryLow=false;this.inventoryStatus='';this.inventoryNotice='';
    },
    listingSearch(query){
@@ -293,8 +297,14 @@ const app = Vue.createApp({
    async loadListing(page=this.listMeta.page){
      clearTimeout(this.listTimer);
      const resource=this.page, request=++this.listRequest;
-     const path=['orders','inventory'].includes(resource)?'/api/pos/'+resource:'/api/pos/management/'+resource;
+     const path=resource==='reports'?'/api/pos/reports/sales':['orders','inventory'].includes(resource)?'/api/pos/'+resource:'/api/pos/management/'+resource;
      const params=new URLSearchParams({page:String(page),per_page:String(this.listSize),q:this.listQuery.trim()});
+     if(resource==='reports'){
+       const {period,from,to,cashier}=this.reportApplied;
+       params.set('period',period);
+       if(period==='custom'){params.set('from',from);params.set('to',to);}
+       if(cashier)params.set('cashier_id',cashier);
+     }
      if(resource==='inventory'){
        if(this.inventoryLow)params.set('low_stock','1');
        if(this.inventoryStatus)params.set('status',this.inventoryStatus);
@@ -305,6 +315,7 @@ const app = Vue.createApp({
        if(request!==this.listRequest)return;
        if(page>result.meta.last_page){await this.loadListing(result.meta.last_page);return;}
        this.listRows=result.data;this.listMeta=result.meta;
+       if(resource==='reports')this.report=result;
      }catch(err){
        if(request!==this.listRequest)return;
        if(!(await this.expireSession(err))){this.listError=err.message;this.listRows=[];this.listMeta=emptyPage();}
@@ -312,6 +323,23 @@ const app = Vue.createApp({
        if(request===this.listRequest)this.listBusy=false;
      }
    },
+   reportPeriodChanged(){
+     if(this.reportForm.period==='custom'&&!this.reportForm.from&&!this.reportForm.to&&this.report?.range){
+       this.reportForm.from=this.report.range.from;
+       this.reportForm.to=this.report.range.to;
+     }
+     this.reportForm.cashier='';
+   },
+   applyReport(){
+     this.reportApplied={...this.reportForm};
+     return this.loadListing(1);
+   },
+   reportMoney(amount){
+     const minor=BigInt(amount);
+     const abs=minor<0n?-minor:minor;
+     return (minor<0n?'−':'')+'Rs. '+reportInteger.format(abs/100n)+'.'+String(abs%100n).padStart(2,'0');
+   },
+   methodLabel(method){return this.paymentMethods[method]??'Not recorded';},
    async loadProductOptions(){
      const request=++this.optionsRequest;
      this.optionsState='loading';

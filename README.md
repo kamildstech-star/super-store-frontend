@@ -33,3 +33,7 @@ Management and Orders tables load one server page at a time. Search filters the 
 - **Receipt:** A finalized sale opens its receipt. Choose **Print receipt** to use the browser print dialog (select your receipt printer/paper size and disable browser headers and footers if enabled). Reopen any finalized receipt using the receipt icon in **Orders**. Older cash receipts do not display tender or change that was never recorded.
 - **Retry:** If a save is not confirmed, use **Resolve previous save** and **Retry original submission**. The working cart is locked until the original submission has a known result. The same-tab, same-session recovery also works after a refresh; it is not offline checkout. If the login session has ended, check Orders before repeating a sale.
 - In **Orders**, the pencil edits draft orders only. Click a row for read-only order details, or the eye icon for a quick preview.
+
+## Daily Sales Report
+
+Open **Reports** in the top bar. Choose Today, Yesterday or a custom date range (Pakistan time), optionally select a cashier, and apply the filters. Summary and payment totals cover all matching finalized orders even when the details are paginated. Drafts are excluded. Use the order or receipt icon to review or print a sale. Historical non-cash payment methods remain visible. Refunds and net sales after refunds are not available until returns are implemented; sales after discounts are not drawer cash or profit.
