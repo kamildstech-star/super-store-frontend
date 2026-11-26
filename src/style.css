@@ -186,3 +186,22 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .product-meta .product-out-of-stock{color:#8a2b43;font-weight:650}
 .topbar button[data-key-target]:focus-visible{outline:2px solid var(--plum);outline-offset:2px}
 @media(max-width:520px){.register-stock-notice{top:105px}}
+
+/* Keep navigation icons direct and action icons visible without wrapping on phones. */
+.topbar .pos-nav-button,.topbar .new-order,.topbar .icon-button,.topbar .profile-toggle{min-width:44px;min-height:44px}
+.cart-row .cart-remove{width:44px;min-width:44px;height:44px}
+.stock-archived{margin-right:5px;background:#eee9f0;color:#514357}
+.cart-recovery{margin:0;padding:6px 13px;background:#f4edf5;color:#583852;font-size:12px}
+.barcode-scan-feedback{min-height:1.5em;margin:9px 0}
+.inventory-tools select{min-height:38px;border:1px solid var(--border);border-radius:6px;padding:0 6px;background:#fff}
+.register-checkout .secondary{min-height:44px}
+@media(max-width:650px){
+ .topbar{flex-wrap:nowrap;gap:4px;padding-block:4px;padding-inline:6px}
+ .top-pages{flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;gap:1px;padding:2px;scrollbar-width:thin;scrollbar-color:#c7b4c9 #f5f1f6;overscroll-behavior-x:contain}
+ .top-pages .pos-nav-button{flex:none}
+ .top-pages .pos-nav-button:focus-visible{outline-offset:-2px}
+ .top-actions{flex:none;flex-wrap:nowrap;gap:1px}
+ .topbar .new-order{display:none}
+ .topbar .menu-panel{width:min(220px, calc(100vw - 24px));right:-40px}
+ .topbar .profile-menu{right:-42px}
+}

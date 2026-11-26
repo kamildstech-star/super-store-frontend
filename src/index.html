@@ -100,6 +100,11 @@
     <div class="mg-list-tools inventory-tools">
       <input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" aria-label="Search inventory" placeholder="Search product, code or barcode…">
       <label><input type="checkbox" v-model="inventoryLow" @change="loadListing(1)"> Low stock only</label>
+      <label>Product status
+        <select v-model="inventoryStatus" @change="loadListing(1)">
+          <option value="">All products</option><option value="active">Active only</option><option value="archived">Archived only</option>
+        </select>
+      </label>
     </div>
     <div class="mg-table-wrap"><table class="mg-table">
       <thead><tr><th scope="col">Product</th><th scope="col">Code</th><th scope="col">On hand</th><th scope="col">Low-stock threshold</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
@@ -107,10 +112,10 @@
         <tr v-for="item in listBusy ? [] : listRows" :key="item.id">
           <td>{{item.name}}</td><td>{{item.internal_code}}</td><td>{{quantity(item.stock_milli/1000)}} {{item.unit.code}}</td>
           <td>{{quantity(item.low_stock_milli/1000)}} {{item.unit.code}}</td>
-          <td><span class="stock-badge" :class="item.stock_milli<=item.low_stock_milli?'stock-low':'stock-good'">{{item.stock_milli===0?'Out of stock':item.stock_milli<=item.low_stock_milli?'Low stock':'In stock'}}</span></td>
+          <td><span v-if="!item.is_active" class="stock-badge stock-archived">Archived</span><span class="stock-badge" :class="item.stock_milli<=item.low_stock_milli?'stock-low':'stock-good'">{{item.stock_milli===0?'Out of stock':item.stock_milli<=item.low_stock_milli?'Low stock':'In stock'}}</span></td>
           <td class="mg-row-tools">
-            <button type="button" class="secondary action-icon" @click="startStock(item)" :aria-label="'Update stock for '+item.name" title="Update stock"><pos-icon name="edit"></pos-icon></button>
-            <button type="button" class="secondary action-icon" @click="startStock(item,'threshold')" :aria-label="'Set low-stock threshold for '+item.name" title="Set low-stock threshold"><pos-icon name="units"></pos-icon></button>
+            <button v-if="item.is_active || item.stock_milli>0" type="button" class="secondary action-icon" @click="startStock(item)" :aria-label="'Update stock for '+item.name" title="Update stock"><pos-icon name="edit"></pos-icon></button>
+            <button v-if="item.is_active" type="button" class="secondary action-icon" @click="startStock(item,'threshold')" :aria-label="'Set low-stock threshold for '+item.name" title="Set low-stock threshold"><pos-icon name="units"></pos-icon></button>
             <button type="button" class="secondary action-icon" @click="showStockHistory(item)" :aria-label="'Stock history for '+item.name" title="Stock history"><pos-icon name="orders"></pos-icon></button>
           </td>
         </tr>
@@ -168,6 +173,7 @@
       <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : editingOrder ? 'EDITING SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{saleOrderRef}}</h1></div>
       <button v-if="!viewedOrder && !editingOrder" class="icon-button trash" aria-label="Clear order" title="Clear order" :disabled="!lines.length" @click="openDialog('clear')"><pos-icon name="trash"></pos-icon></button>
     </div>
+    <p v-if="!viewedOrder && !editingOrder && (cartNotice || cartStorageError)" class="cart-recovery" role="status">{{cartStorageError?'This browser could not save the working cart. Park it to keep a server copy.':cartNotice}}</p>
     <div class="order-lines" aria-label="Cart items" data-register-keys="cart">
       <div v-for="line in displayedLines" :key="line.id" class="cart-row" :class="{ selected:!viewedOrder && line.id===selected }">
         <button v-if="!viewedOrder" type="button" class="icon-button cart-remove" @click="removeFromCart(line.id)"
@@ -206,7 +212,10 @@
         <button type="button" class="secondary" @click="requestEditExit()">Cancel edit</button>
         <button type="button" class="pay-button" :disabled="!lines.length" @click="openDialog('update')">Save changes</button>
       </div>
-      <button v-else class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><pos-icon name="card"></pos-icon> Payment</button>
+      <div v-else class="order-edit-actions register-checkout">
+        <button type="button" class="secondary" :disabled="!lines.length" @click="openDialog('park')"><pos-icon name="archive"></pos-icon> Park order</button>
+        <button type="button" class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><pos-icon name="card"></pos-icon> Payment</button>
+      </div>
       </template>
     </div>
   </section>
@@ -233,7 +242,7 @@
     <div class="catalog-tools">
       <div class="search-row flex items-center" data-register-keys="search">
         <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" data-key-target type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
-        <button type="button" class="secondary scan-focus" data-key-target @click="clearSearch()" title="Focus the search box, then scan with an Enter-suffix scanner"><pos-icon name="barcode"></pos-icon> Scan barcode</button>
+        <button type="button" class="secondary scan-focus" data-key-target @click="openScanner" :disabled="catalogState!=='ready'" title="Scan an exact product barcode"><pos-icon name="barcode"></pos-icon> Scan barcode</button>
       </div>
       <small v-if="searchStatus" class="scan-status" role="status">{{searchStatus}}</small>
       <div class="category-row" role="group" aria-label="Product categories" data-register-keys="categories">
@@ -285,12 +294,13 @@
       <div class="pos-modal-body">
         <p v-if="stockError" class="mg-error" role="alert">{{stockError}}</p>
         <p>On hand: <strong>{{quantity(inventoryItem.stock_milli/1000)}} {{inventoryItem.unit.code}}</strong></p>
+        <p v-if="!inventoryItem.is_active">Archived products can only have stock removed. Reactivate this product to add stock.</p>
         <div class="mg-field-grid stock-form">
           <label v-if="stockForm.type!=='threshold'" class="mg-field">Movement
-            <select v-model="stockForm.type"><option v-for="(name,type) in stockTypes" v-show="type!=='sale'" :key="type" :value="type" :disabled="type==='sale'">{{name}}</option></select>
+            <select v-model="stockForm.type"><option v-for="(name,type) in stockTypes" v-show="type!=='sale' && (inventoryItem.is_active || ['adjustment','damage'].includes(type))" :key="type" :value="type" :disabled="type==='sale' || (!inventoryItem.is_active && !['adjustment','damage'].includes(type))">{{name}}</option></select>
           </label>
           <label class="mg-field">{{stockForm.type==='threshold'?'Low-stock threshold':'Quantity'}} ({{inventoryItem.unit.code}})
-            <input type="number" v-model="stockForm.quantity" :min="stockForm.type==='adjustment'?-1000000:stockForm.type==='threshold'?0:10 ** -inventoryItem.unit.quantity_precision" :step="10 ** -inventoryItem.unit.quantity_precision" max="1000000" required data-start-focus>
+            <input type="number" v-model="stockForm.quantity" :min="stockForm.type==='adjustment'?-1000000:stockForm.type==='threshold'?0:10 ** -inventoryItem.unit.quantity_precision" :step="10 ** -inventoryItem.unit.quantity_precision" :max="!inventoryItem.is_active && stockForm.type==='adjustment' ? -(10 ** -inventoryItem.unit.quantity_precision) : 1000000" required data-start-focus>
             <small v-if="stockForm.type==='adjustment'">Use a negative quantity to reduce stock.</small>
           </label>
           <div v-if="stockForm.type==='receipt'" class="mg-field">
@@ -366,7 +376,7 @@
     </form>
     <template v-else-if="actionDialog==='remove' && managementDelete">
       <div class="pos-modal-body">
-        <p class="pos-modal-description">{{page==='products' ? 'This product will no longer appear on the sale screen. You can restore it by editing the product.' : 'This record will be permanently deleted. This action cannot be undone.'}}</p>
+        <p class="pos-modal-description">{{page==='products' ? 'This product will no longer appear on the sale screen. Its stock and history remain in Inventory. You can reactivate it by editing the product.' : 'This record will be permanently deleted. This action cannot be undone.'}}</p>
         <p v-if="managementError" class="mg-error" role="alert">{{managementError}}</p>
       </div>
       <footer class="pos-modal-footer">
@@ -412,9 +422,25 @@
   </div>
 </dialog>
 
-<dialog id="dialog" @cancel="orderSaving && $event.preventDefault()" @close="dialogName=''">
+<dialog id="dialog" aria-labelledby="register-dialog-title" @cancel="orderSaving && $event.preventDefault()" @close="dialogName=''">
   <div class="dialog-body" v-if="dialogName">
-    <div class="flex items-center justify-between dialog-heading"><h2>{{ dialogTitles[dialogName] }}</h2><button class="icon-button" @click="closeDialog" aria-label="Close dialog" :disabled="orderSaving"><pos-icon name="close"></pos-icon></button></div>
+    <div class="flex items-center justify-between dialog-heading"><h2 id="register-dialog-title">{{ dialogTitles[dialogName] }}</h2><button class="icon-button" @click="closeDialog" aria-label="Close dialog" :disabled="orderSaving"><pos-icon name="close"></pos-icon></button></div>
+    <template v-if="dialogName==='scan'">
+      <form class="barcode-scan-form" @submit.prevent="scanBarcode">
+        <p>Scan a label or enter the complete barcode. The scanner should send Enter after each scan.</p>
+        <label class="mg-field" for="barcode-scan-input">Barcode
+          <input id="barcode-scan-input" v-model="scanCode" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan or type a barcode" autofocus>
+        </label>
+        <p class="barcode-scan-feedback" :class="{'mg-error':scanStatus && scanFailed}" role="status" aria-atomic="true">{{scanStatus}}</p>
+        <div class="dialog-buttons"><button type="button" @click="closeDialog">Done</button><button class="primary" type="submit">Add item</button></div>
+      </form>
+    </template>
+    <template v-if="dialogName==='park'">
+      <p>Save this order as a draft and free the register. Reopen it from Orders using the edit icon. Parking does not reserve or deduct stock.</p>
+      <div class="payment-preview"><span>{{lines.length}} {{lines.length===1?'item':'items'}}</span><strong>{{money(total)}}</strong></div>
+      <p v-if="orderSaveError" class="mg-error" role="alert">{{orderSaveError}}</p>
+      <div class="dialog-buttons"><button type="button" @click="closeDialog" :disabled="orderSaving">Back</button><button type="button" class="primary" @click="saveOrder(false)" :disabled="orderSaving">{{orderSaving?'Parking…':'Park order'}}</button></div>
+    </template>
     <template v-if="dialogName==='payment' || dialogName==='update'">
       <p>Save a draft without changing stock, or record payment received and finalize the sale.</p>
       <div class="payment-preview"><span>Order {{saleOrderRef}} · {{lines.length}} {{lines.length===1?'line':'lines'}}</span><strong>{{money(total)}}</strong></div>
@@ -454,7 +480,7 @@
       <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="note=draftNote.trim();closeDialog()">Save note</button></div>
     </template>
     <template v-if="dialogName==='help'">
-      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match or activate the focused button</dd><dt>Arrow keys</dt><dd>Up from Search reaches the top bar. Left and Right move across its icons; Down returns to Search. Move between search, categories and products. From the left edge of products, press Left for the cart. Down from the last cart line opens keypad focus.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
+      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add an exact code match or activate the focused button</dd><dt>Arrow keys</dt><dd>Up from Search reaches the top bar. Left and Right move across its icons; Down returns to Search. Move between search, categories and products. From the left edge of products, press Left for the cart. Down from the last cart line opens keypad focus.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
     </template>
   </div>
 </dialog>
