@@ -26,7 +26,7 @@
     </form>
   </section>
 </main>
-<header v-if="user" class="topbar" data-register-keys="topbar">
+<header v-if="user" :inert="Boolean(pendingSubmission)" class="topbar" data-register-keys="topbar">
   <nav class="top-pages" aria-label="POS pages">
     <button v-for="item in pages" :key="item.id" data-key-target class="pos-nav-button" type="button"
       :title="item.label" :aria-label="item.label" :aria-current="page===item.id?'page':undefined"
@@ -56,6 +56,12 @@
   </div>
 </header>
 <p v-if="user && authError" class="mg-error" role="alert">{{authError}}</p>
+<section v-if="user && pendingSubmission" class="submission-banner" aria-label="Pending order submission">
+  <p role="status">Previous save not confirmed. Resolve it before changing the cart.</p>
+  <button type="button" class="secondary" @click="openDialog('recover')">Resolve previous save</button>
+</section>
+<p v-else-if="user && submissionNotice" class="mg-error submission-banner" role="alert">{{submissionNotice}}</p>
+<p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && (cartNotice || cartStorageError)" class="cart-recovery" role="status">{{cartStorageError?'This browser could not save the working cart. Park it to keep a server copy.':cartNotice}}</p>
 
 <main v-if="user && page==='orders'" class="management-page orders-page">
   <div class="mg-page-head">
@@ -77,6 +83,8 @@
           <td class="mg-row-tools">
             <button type="button" class="secondary action-icon" @click.stop="showOrder(order.id,true)"
               :aria-label="'View order '+orderRef(order.id)" :title="'View order '+orderRef(order.id)"><pos-icon name="view"></pos-icon></button>
+            <button v-if="order.finalized_at" type="button" class="secondary action-icon" @click.stop="showOrder(order.id,false,false,true)"
+              :aria-label="'Receipt for order '+orderRef(order.id)" title="Receipt"><pos-icon name="orders"></pos-icon></button>
             <button v-if="!order.finalized_at" type="button" class="secondary action-icon" @click.stop="showOrder(order.id,false,true)"
               :aria-label="'Edit order '+orderRef(order.id)" :title="'Edit order '+orderRef(order.id)"><pos-icon name="edit"></pos-icon></button>
           </td>
@@ -166,14 +174,13 @@
   </section>
 </main>
 
-<main v-if="user && page==='register'" class="workspace" :class="{ 'show-order': mobile==='order' || viewedOrder, 'view-saved-order': viewedOrder }">
+<main v-if="user && page==='register'" :inert="Boolean(pendingSubmission)" class="workspace" :class="{ 'show-order': mobile==='order' || viewedOrder, 'view-saved-order': viewedOrder }">
   <p class="register-stock-notice" role="alert" aria-atomic="true"><span v-if="registerStockNotice">{{registerStockNotice}}</span></p>
   <section class="order-panel" :aria-label="viewedOrder ? 'Saved order items' : 'Current order'">
     <div class="order-head flex items-center justify-between">
       <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : editingOrder ? 'EDITING SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{saleOrderRef}}</h1></div>
       <button v-if="!viewedOrder && !editingOrder" class="icon-button trash" aria-label="Clear order" title="Clear order" :disabled="!lines.length" @click="openDialog('clear')"><pos-icon name="trash"></pos-icon></button>
     </div>
-    <p v-if="!viewedOrder && !editingOrder && (cartNotice || cartStorageError)" class="cart-recovery" role="status">{{cartStorageError?'This browser could not save the working cart. Park it to keep a server copy.':cartNotice}}</p>
     <div class="order-lines" aria-label="Cart items" data-register-keys="cart">
       <div v-for="line in displayedLines" :key="line.id" class="cart-row" :class="{ selected:!viewedOrder && line.id===selected }">
         <button v-if="!viewedOrder" type="button" class="icon-button cart-remove" @click="removeFromCart(line.id)"
@@ -234,6 +241,7 @@
       <p>This saved order is read-only. Your current sale is unchanged.</p>
       <div class="mg-actions">
         <button type="button" class="secondary" @click="goPage('orders')"><pos-icon name="back"></pos-icon> Back to orders</button>
+        <button v-if="viewedOrder.finalized_at" type="button" class="secondary" @click="openReceipt(viewedOrder)"><pos-icon name="orders"></pos-icon> Receipt</button>
         <button type="button" class="primary" @click="goPage('register')"><pos-icon name="register"></pos-icon> Return to current sale</button>
       </div>
     </div>
@@ -274,7 +282,7 @@
   </section>
 </main>
 
-<nav v-if="user && page==='register' && !viewedOrder" class="mobile-nav" aria-label="Mobile register views">
+<nav v-if="user && page==='register' && !viewedOrder" :inert="Boolean(pendingSubmission)" class="mobile-nav" aria-label="Mobile register views">
   <button :class="{active:mobile==='catalog'}" @click="mobile='catalog'"><pos-icon name="grid"></pos-icon> Products</button>
   <button :class="{active:mobile==='order'}" @click="mobile='order'"><pos-icon name="basket"></pos-icon> Order · {{ money(total) }}</button>
 </nav>
@@ -435,6 +443,16 @@
         <div class="dialog-buttons"><button type="button" @click="closeDialog">Done</button><button class="primary" type="submit">Add item</button></div>
       </form>
     </template>
+    <template v-if="dialogName==='recover' && pendingSubmission">
+      <p>The server may have saved this order. Retry the same submission to confirm its outcome without adding a second sale.</p>
+      <div class="payment-preview"><span>{{pendingSubmission.finalize ? 'Finalize · '+paymentMethods[pendingSubmission.body.payment_method] : 'Save draft'}}</span><strong>{{money(pendingSubmission.total)}}</strong></div>
+      <p v-if="pendingSubmission.body.cash_received_minor!=null">Cash received: {{money(pendingSubmission.body.cash_received_minor)}}</p>
+      <p v-if="orderSaveError" class="mg-error" role="alert">{{orderSaveError}}</p>
+      <div class="dialog-buttons">
+        <button type="button" @click="closeDialog" :disabled="orderSaving">Close</button>
+        <button type="button" class="primary" @click="submitPendingOrder" :disabled="orderSaving">{{orderSaving?'Checking…':'Retry original submission'}}</button>
+      </div>
+    </template>
     <template v-if="dialogName==='park'">
       <p>Save this order as a draft and free the register. Reopen it from Orders using the edit icon. Parking does not reserve or deduct stock.</p>
       <div class="payment-preview"><span>{{lines.length}} {{lines.length===1?'item':'items'}}</span><strong>{{money(total)}}</strong></div>
@@ -451,11 +469,22 @@
           <option v-for="(label,method) in paymentMethods" :key="method" :value="method">{{label}}</option>
         </select>
       </label>
-      <p v-if="paymentMethod">Finalize only after payment is received. This records it and deducts stock; it does not charge a card.</p>
+      <div v-if="paymentMethod==='cash'" class="cash-tender">
+        <label class="mg-field" for="cash-received">Cash received (PKR)
+          <input id="cash-received" v-model="cashReceived" inputmode="decimal" maxlength="18" placeholder="0.00" :disabled="orderSaving" aria-describedby="cash-feedback">
+        </label>
+        <button type="button" class="secondary" @click="cashReceived=(total/100).toFixed(2)" :disabled="orderSaving">Exact amount</button>
+        <p id="cash-feedback" role="status">
+          <template v-if="cashMinor!==null && cashMinor>=total">Change due: <strong>{{money(cashMinor-total)}}</strong></template>
+          <template v-else-if="cashMinor!==null">Still due: <strong>{{money(total-cashMinor)}}</strong></template>
+          <template v-else-if="cashReceived">Enter a valid amount with up to two decimal places.</template>
+        </p>
+      </div>
+      <p v-if="paymentMethod && paymentMethod!=='cash'">Confirm payment outside the POS first. This records the method and does not charge a card or initiate a transfer.</p>
       <div class="dialog-buttons stock-checkout-actions">
         <button @click="closeDialog" :disabled="orderSaving">Back</button>
         <button @click="saveOrder(false)" :disabled="orderSaving">{{editingOrder?'Save changes':'Save draft'}}</button>
-        <button class="primary" @click="saveOrder(true)" :disabled="orderSaving || !paymentMethod">{{orderSaving?'Saving…':'Finalize sale'}}</button>
+        <button class="primary" @click="saveOrder(true)" :disabled="orderSaving || !canFinalize">{{orderSaving?'Saving…':'Finalize sale'}}</button>
       </div>
     </template>
     <template v-if="dialogName==='discard'">
@@ -483,6 +512,41 @@
       <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add an exact code match or activate the focused button</dd><dt>Arrow keys</dt><dd>Up from Search reaches the top bar. Left and Right move across its icons; Down returns to Search. Move between search, categories and products. From the left edge of products, press Left for the cart. Down from the last cart line opens keypad focus.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
     </template>
   </div>
+</dialog>
+<dialog id="receipt-dialog" class="receipt-dialog" aria-labelledby="receipt-heading" @close="receiptOrder=null">
+  <template v-if="receiptOrder">
+    <article class="receipt-paper">
+      <header class="receipt-heading">
+        <h2 id="receipt-heading">Super Store</h2>
+        <p>Sales receipt {{orderRef(receiptOrder.id)}}</p>
+      </header>
+      <dl class="receipt-facts">
+        <div><dt>Date (PKT)</dt><dd>{{receiptDate(receiptOrder.finalized_at)}}</dd></div>
+        <div><dt>Cashier</dt><dd>{{receiptOrder.finalized_cashier || receiptOrder.cashier}}</dd></div>
+        <div><dt>Customer</dt><dd>{{receiptOrder.customer || 'Walk-in'}}</dd></div>
+      </dl>
+      <table class="receipt-items">
+        <thead><tr><th scope="col">Item</th><th scope="col">Amount</th></tr></thead>
+        <tbody><tr v-for="line in receiptOrder.lines" :key="line.sku">
+          <td><strong>{{line.name}}</strong><small>{{quantity(line.qty)}} {{line.unit}} × {{money(line.price_minor)}}<template v-if="line.discount"> · {{line.discount}}% off</template></small></td>
+          <td>{{money(line.total_minor)}}</td>
+        </tr></tbody>
+      </table>
+      <dl class="receipt-facts receipt-totals">
+        <div><dt><strong>Total</strong></dt><dd><strong>{{money(receiptOrder.total_minor)}}</strong></dd></div>
+        <div><dt>Payment</dt><dd>{{paymentMethods[receiptOrder.payment_method]}}</dd></div>
+        <template v-if="receiptOrder.payment_method==='cash' && receiptOrder.cash_received_minor!=null">
+          <div><dt>Cash received</dt><dd>{{money(receiptOrder.cash_received_minor)}}</dd></div>
+          <div><dt>Change</dt><dd>{{money(receiptOrder.change_minor)}}</dd></div>
+        </template>
+      </dl>
+      <p v-if="receiptOrder.payment_method==='cash' && receiptOrder.cash_received_minor==null" class="receipt-legacy">Original cash received and change were not recorded.</p>
+    </article>
+    <footer class="receipt-actions">
+      <button type="button" class="secondary" @click="closeReceipt">Close receipt</button>
+      <button type="button" class="primary" @click="printReceipt" autofocus><pos-icon name="orders"></pos-icon> Print receipt</button>
+    </footer>
+  </template>
 </dialog>
 </div>
 <noscript>This demo requires JavaScript to run.</noscript>

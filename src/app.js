@@ -100,8 +100,11 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
 
 const pages = [{id:'register',label:'Register'}, {id:'orders',label:'Orders'}, {id:'inventory',label:'Inventory',icon:'archive'},
   ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
+const maxCashMinor=9000000000000000;
+const snapshotLines=lines=>lines.map(({id,name,unit,precision,qty,price,discount})=>({id,name,unit,precision,qty,price,discount}));
+const receiptTime=new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Karachi'});
 const cartStorageKey='super-store.pos.register.v1';
-const dialogs = {scan:'Scan barcode',park:'Park order',clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Checkout',update:'Save order changes?',discard:'Discard order changes?',help:'Keyboard shortcuts'};
+const dialogs = {recover:'Resolve last submission',scan:'Scan barcode',park:'Park order',clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Checkout',update:'Save order changes?',discard:'Discard order changes?',help:'Keyboard shortcuts'};
 const app = Vue.createApp({
  render: registerRender,
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
@@ -110,7 +113,7 @@ const app = Vue.createApp({
    inventoryLow:false,inventoryStatus:'',inventoryNotice:'',inventoryItem:null,stockForm:null,stockError:'',
    registerStockNotice:'',registerStockTimer:null,stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale'},
-   paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},paymentMethod:'',saleFinalized:false,
+   paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},paymentMethod:'',cashReceived:'',saleFinalized:false,receiptOrder:null,pendingSubmission:null,submissionNotice:'',
    ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    cartScope:null,cartReady:false,cartNotice:'',cartStorageError:false,scanCode:'',scanStatus:'',scanFailed:false,
    orderRequestId:null,orderSaving:false,orderSaveError:'',savedOrderId:null,savedOrderEdited:false,editingOrder:null,parkedDraft:null,editExitPage:'orders',searchStatus:'',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
@@ -120,9 +123,17 @@ const app = Vue.createApp({
      return this.cartReady&&this.cartScope&&cart ? JSON.stringify({
        scope:this.cartScope,requestId:cart.orderRequestId,number:this.orderNumber,
        customer:cart.customer,note:cart.note,
-       lines:cart.lines.map(({id,name,unit,precision,qty,price,discount})=>({id,name,unit,precision,qty,price,discount}))
+       lines:snapshotLines(cart.lines),pending:this.pendingSubmission
      }) : null;
    },
+   cashMinor(){
+     const raw=String(this.cashReceived).trim();
+     if(!/^\d+(?:\.\d{1,2})?$/.test(raw))return null;
+     const [rupees,paisa='']=raw.split('.');
+     const minor=Number(rupees)*100+Number(paisa.padEnd(2,'0'));
+     return Number.isSafeInteger(minor)&&minor<=maxCashMinor?minor:null;
+   },
+   canFinalize(){return Boolean(this.paymentMethod)&&(this.paymentMethod!=='cash'||(this.cashMinor!==null&&this.cashMinor>=this.total));},
    actionTitle(){
      if(this.actionDialog==='stock')return 'Update stock · '+this.inventoryItem?.name;
      if(this.actionDialog==='stock-history')return 'Stock history · '+this.inventoryItem?.name;
@@ -180,6 +191,15 @@ const app = Vue.createApp({
            this.orderNumber=saved.number;
            this.select(this.lines[0]?.id??null);
            if(this.lines.length||this.customer||this.note)this.cartNotice='Unsaved cart restored in this tab.';
+           this.pendingSubmission=saved.pending??null;
+           if(this.pendingSubmission?.edit){
+             const {order,lines,customer,note}=this.pendingSubmission.edit;
+             this.parkedDraft={lines:this.lines,selected:this.selected,customer:this.customer,note:this.note,orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer};
+             this.editingOrder=order;
+             this.lines=lines.map(line=>({...line,locked:true}));this.customer=customer;this.note=note;
+             this.select(this.lines[0]?.id??null);
+             this.mobile='order';
+           }
          }
        }
      }catch{this.cartStorageError=true;}
@@ -188,7 +208,7 @@ const app = Vue.createApp({
    persistCart(snapshot){
      try{
        const cart=JSON.parse(snapshot);
-       if(cart.lines.length||cart.customer||cart.note)sessionStorage.setItem(cartStorageKey,snapshot);
+       if(cart.lines.length||cart.customer||cart.note||cart.pending)sessionStorage.setItem(cartStorageKey,snapshot);
        else sessionStorage.removeItem(cartStorageKey);
        this.cartStorageError=false;
      }catch{this.cartStorageError=true;}
@@ -234,7 +254,8 @@ const app = Vue.createApp({
      this.user=null;this.authState='guest';this.profile=false;this.menu=false;
      this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
      this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';this.searchStatus='';
-     this.editingOrder=null;this.parkedDraft=null;this.savedOrderEdited=false;this.saleFinalized=false;
+     this.pendingSubmission=null;this.submissionNotice='';this.orderSaveError='';this.dialogName='';document.getElementById('dialog')?.close();
+     this.closeReceipt();this.editingOrder=null;this.parkedDraft=null;this.savedOrderEdited=false;this.saleFinalized=false;
      this.clearOrder();this.orderNumber='001';this.resetListing();this.ordersError='';
      this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;this.savedOrderId=null;
    },
@@ -245,6 +266,7 @@ const app = Vue.createApp({
      return true;
    },
    async goPage(page){
+     if(this.pendingSubmission)return;
      if(this.editingOrder){if(page!=='register')this.requestEditExit(page);return;}
      this.closeActionDialog(true);
      this.clearRegisterStockNotice();
@@ -369,7 +391,7 @@ const app = Vue.createApp({
      this.profile=false;this.menu=false;
      this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
    },
-   async showOrder(id,preview=false,edit=false){
+   async showOrder(id,preview=false,edit=false,receipt=false){
      if(preview){
        this.previewedOrder=null;this.previewOrderId=id;this.previewError='';
        this.openActionDialog('order');
@@ -379,7 +401,8 @@ const app = Vue.createApp({
      try{
        const order=await posRequest('/api/pos/orders/'+id);
        if(request!==this.orderDetailRequest)return;
-       if(preview)this.previewedOrder=order;
+       if(receipt)this.openReceipt(order);
+       else if(preview)this.previewedOrder=order;
        else if(edit){
          if(order.finalized_at){this.ordersError='Finalized sales cannot be edited.';return;}
          await this.loadCatalog();
@@ -397,7 +420,7 @@ const app = Vue.createApp({
        lines:this.lines,selected:this.selected,customer:this.customer,note:this.note,
        orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer,
      };
-     this.editingOrder={id:order.id,revision:order.revision,checkoutId:null};
+     this.editingOrder={id:order.id,revision:order.revision};
      this.viewedOrder=null;this.page='register';this.mobile='order';
      this.customer=order.customer??'';this.note=order.note??'';
      this.lines=order.lines.map(line=>{
@@ -420,36 +443,76 @@ const app = Vue.createApp({
      if(page==='logout')return this.logout();
      return this.goPage(page);
    },
-   async saveOrder(finalize=false){
-     if(this.orderSaving||!this.lines.length||(finalize&&!this.paymentMethod))return;
+   saveOrder(finalize=false){
+     if(this.pendingSubmission||this.orderSaving||!this.lines.length||(finalize&&!this.canFinalize))return;
+     const edit=this.editingOrder;
+     const body={
+       ...(edit?{revision:edit.revision,[finalize?'checkout_id':'update_id']:crypto.randomUUID()}:{request_id:this.orderRequestId??=crypto.randomUUID()}),
+       ...(finalize?{payment_method:this.paymentMethod,...(this.paymentMethod==='cash'?{cash_received_minor:this.cashMinor}:{})}:{}),
+       customer:this.customer||null,note:this.note||null,
+       lines:this.lines.map(l=>({sku:l.id,qty:l.qty,price_minor:l.price,discount:l.discount})),
+     };
+     this.submissionNotice='';
+     this.pendingSubmission={
+       path:finalize?(edit?'/api/pos/orders/'+edit.id+'/checkout':'/api/pos/checkout'):'/api/pos/orders'+(edit?'/'+edit.id:''),
+       method:edit&&!finalize?'PUT':'POST',body,finalize,parking:this.dialogName==='park',
+       total:this.total, edit:edit?{order:{...edit},lines:snapshotLines(this.lines),customer:this.customer,note:this.note}:null,
+     };
+     return this.submitPendingOrder();
+   },
+   async submitPendingOrder(){
+     const attempt=this.pendingSubmission;
+     if(this.orderSaving||!attempt)return;
+     // Persist the immutable request before sending so reload can replay the original operation.
+     if(this.workingCart)this.persistCart(this.workingCart);
      this.orderSaving=true;this.orderSaveError='';
-     const edit=this.editingOrder, parking=this.dialogName==='park';
      try{
-       if(!edit){
-         this.orderRequestId??=crypto.randomUUID();
-         // Preserve the retry key even if this tab reloads while the save is in flight.
-         if(this.workingCart)this.persistCart(this.workingCart);
-       }
-       if(edit&&finalize)edit.checkoutId??=crypto.randomUUID();
-       const path=finalize?(edit?'/api/pos/orders/'+edit.id+'/checkout':'/api/pos/checkout'):'/api/pos/orders'+(edit?'/'+edit.id:'');
-       const saved=await posRequest(path,{method:edit&&!finalize?'PUT':'POST',csrf:this.csrf,body:{
-         ...(edit?{revision:edit.revision}:{request_id:this.orderRequestId}),
-         ...(finalize?{payment_method:this.paymentMethod,...(edit?{checkout_id:edit.checkoutId}:{})}:{}),
-         customer:this.customer||null,note:this.note||null,
-         lines:this.lines.map(l=>({sku:l.id,qty:l.qty,price_minor:l.price,discount:l.discount}))
-       }});
-       if(edit)this.restoreParkedDraft();
+       const saved=await posRequest(attempt.path,{method:attempt.method,csrf:this.csrf,body:attempt.body});
+       if(!saved?.id||!Array.isArray(saved.lines)||(attempt.finalize&&!saved.finalized_at))throw new Error('The server did not confirm the expected order.');
+       this.pendingSubmission=null;
+       if(attempt.edit)this.restoreParkedDraft();
        else this.startNew();
-       this.savedOrderId=saved.id;this.savedOrderEdited=Boolean(edit);this.saleFinalized=Boolean(saved.finalized_at);this.orderSaving=false;this.closeDialog();
-       if(parking&&!saved.finalized_at){
+       this.savedOrderId=saved.id;this.savedOrderEdited=Boolean(attempt.edit);this.saleFinalized=Boolean(saved.finalized_at);
+       const closed=this.waitForOrderDialogClose();
+       this.orderSaving=false;this.closeDialog();
+       if(this.workingCart)this.persistCart(this.workingCart);
+       await closed;
+       if(attempt.parking&&!saved.finalized_at){
          this.cartNotice='Order '+this.orderRef(saved.id)+' parked. Reopen it from Orders.';
          this.$nextTick(()=>document.getElementById('search')?.focus());
-       }else await this.goPage('orders');
+       }else{
+         await this.goPage('orders');
+         if(saved.finalized_at)this.openReceipt(saved);
+       }
      }catch(err){
-       if(await this.expireSession(err)){this.orderSaving=false;this.closeDialog();}
-       else this.orderSaveError=err.message;
+       this.orderSaving=false;
+       if(await this.expireSession(err))return;
+       if([403,404,409,422].includes(err.status)){
+         this.pendingSubmission=null;
+         if(!attempt.edit&&err.status!==409)this.orderRequestId=null;
+         if(this.dialogName==='recover'){
+           this.submissionNotice=err.message;this.closeDialog();
+         }else this.orderSaveError=err.message;
+       }else{
+         this.dialogName='recover';
+         this.orderSaveError='Save not confirmed. Retry the original submission before starting or changing a sale.';
+       }
+       if(this.workingCart)this.persistCart(this.workingCart);
      }finally{this.orderSaving=false;}
    },
+   waitForOrderDialogClose(){
+     const d=document.getElementById('dialog');
+     return d?.open?new Promise(resolve=>d.addEventListener('close',resolve,{once:true})):Promise.resolve();
+   },
+   openReceipt(order){
+     if(!order?.finalized_at)return;
+     this.closeActionDialog(true);
+     this.receiptOrder=order;
+     this.$nextTick(()=>{const d=document.getElementById('receipt-dialog');if(d&&!d.open)d.showModal();});
+   },
+   closeReceipt(){document.getElementById('receipt-dialog')?.close();},
+   printReceipt(){if(this.receiptOrder&&document.getElementById('receipt-dialog')?.open)window.print();},
+   receiptDate(date){return receiptTime.format(new Date(date));},
    orderRef(id){return '#'+String(id).padStart(3,'0');},
    orderDate(value){return new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value));},
    managementStart(row=null){
@@ -566,7 +629,7 @@ const app = Vue.createApp({
        this.categories=result.categories;
        this.catalog=result.products;
        const bySku=new Map(this.catalog.map(product=>[product.id,product]));
-       for(const line of (this.parkedDraft??this).lines){
+       for(const line of [...this.lines,...(this.parkedDraft?.lines??[])]){
          const p=bySku.get(line.id);
          line.locked=!p||p.unit!==line.unit;
          if(!line.locked)line.precision=p.precision;
@@ -579,7 +642,11 @@ const app = Vue.createApp({
    },
    money(cents){return 'Rs. '+format.format(cents/100);},
    quantity(value){return new Intl.NumberFormat('en-PK',{maximumFractionDigits:3}).format(value);},
-   lineTotal(line){return line.savedTotal ?? Math.round(line.qty*line.price*(100-line.discount)/100);},
+   lineTotal(line){
+     if(line.savedTotal!==undefined)return line.savedTotal;
+     const scaled=BigInt(Math.round(line.qty*1000))*BigInt(line.price)*BigInt(10000-Math.round(line.discount*100));
+     return Number((scaled+5000000n)/10000000n);
+   },
    inCart(id){return this.lines.find(l=>l.id===id)?.qty||0;},
    select(id){this.selected=id;this.mode='Qty';this.buffer='';},
    clearRegisterStockNotice(){
@@ -700,7 +767,7 @@ const app = Vue.createApp({
      else if(this.mode==='% Disc'){l.discount=Math.min(100,n);}
      else {l.price=Math.round(Math.min(999999,n)*100);}
    },
-   openDialog(name){this.orderSaveError='';if(['payment','update'].includes(name))this.paymentMethod='';this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
+   openDialog(name){this.orderSaveError='';if(['payment','update'].includes(name)){this.paymentMethod='';this.cashReceived='';}this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
    closeDialog(){if(this.orderSaving)return;document.getElementById('dialog')?.close();},
    closeOutsideHeader(event){
      if(this.menu&&!event.target.closest?.('[data-header-popover="menu"]'))this.menu=false;
@@ -847,7 +914,7 @@ const app = Vue.createApp({
        e.preventDefault();
        return;
      }
-     if(!this.user||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||e.target?.isContentEditable)return;
+     if(!this.user||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||this.receiptOrder||this.pendingSubmission||e.target?.isContentEditable)return;
      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
        if(this.navigateTopBar(e))return;
        if(this.page==='register'&&!this.viewedOrder&&(e.target?.id==='search'||!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)))this.navigateRegister(e);
