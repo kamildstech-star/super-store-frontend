@@ -19,6 +19,7 @@ Management and Orders tables load one server page at a time. Search filters the 
 
 - Use the top-bar icons to open Products, Categories, Units, and Suppliers. Create, view and edit records in popups. In the product form, search Category, Unit or Supplier by name, code or contact details. Use the arrow keys and Enter to select an option; Escape closes the list. Results float above the form without moving other fields. Archive products or delete unused categories, units and suppliers with a separate confirmation.
 - Set **Retail Price** (regular shelf price) and **Sale Price** (default checkout price), both in PKR. Products shows both prices; the register uses Sale Price.
+- Add, replace or remove an optional **Product image** in the Add/Edit popup. The preview is local until saved. POS cards display the uploaded photo or the default illustration.
 - Leave the product's **Internal code** blank to generate a random unused four-digit value; edit it later if needed. Barcode is separate.
 - Focus **Scan barcode** and use a keyboard-mode scanner set to send Enter, or enter a code manually and press Enter. A unique exact match adds to the cart even if another category is selected. Repeated scans increase quantity.
 - Open **Inventory** to enter opening stock, receive supplier stock, adjust quantities and record damage. Set a low-stock threshold per product; **Low stock only** filters the list. Stock history shows who recorded each change and its reason.

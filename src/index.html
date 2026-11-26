@@ -241,7 +241,8 @@
         <button v-for="p in filtered" :key="p.id" class="product" :aria-label="'Add '+p.name" @click="add(p)">
           <div class="product-art" :style="{ '--tone':p.tone }">
             <span class="unit-label">{{ p.unit }}</span>
-            <span class="product-illustration" v-html="art(p)"></span>
+            <img v-if="p.image" class="product-photo" :src="p.image" alt="" loading="lazy" decoding="async" @error="p.image=null">
+            <span v-else class="product-illustration" v-html="art(p)"></span>
             <span v-if="inCart(p.id)" class="in-cart" :aria-label="quantity(inCart(p.id))+' in order'">{{ quantity(inCart(p.id)) }}</span>
           </div>
           <div class="product-meta"><strong>{{ p.name }}</strong><small v-if="p.stock!==null" class="product-stock">{{quantity(p.stock)}} {{p.unit}} in stock</small><span>{{ money(p.price) }} <small>/ {{ p.unit }}<template v-if="p.code"> · {{p.code}}</template></small></span></div>
@@ -330,6 +331,22 @@
         <small v-if="field.code && !managementForm.id">Leave blank and Laravel assigns an unused 4-digit code.</small>
         <small v-if="field.hint">{{field.hint}}</small>
       </div>
+      <div v-if="page==='products'" class="mg-field product-image-field">
+        <label for="management-product-image">Product image (optional)</label>
+        <div class="product-image-control">
+          <img v-if="productImagePreview || (!productImageRemove && productImageUrl(managementForm.image_url))"
+            class="product-image-preview" :src="productImagePreview || productImageUrl(managementForm.image_url)" alt="Product image preview">
+          <div>
+            <input id="management-product-image" type="file" accept="image/jpeg,image/png,image/webp"
+              aria-describedby="product-image-hint" :disabled="managementBusy" @change="selectProductImage">
+            <small id="product-image-hint">JPG, PNG or WebP, up to 2 MB and 4096 × 4096 px. Changes apply when you save.</small>
+            <button v-if="productImagePreview || (!productImageRemove && managementForm.image_url)" type="button"
+              class="secondary product-image-remove" :disabled="managementBusy" @click="removeProductImage">Remove image</button>
+          </div>
+        </div>
+        <small v-if="productImageRemove" role="status">The current image will be removed when you save.</small>
+        <p v-if="productImageError" class="mg-error" role="alert">{{productImageError}}</p>
+      </div>
     </div>
       </div>
       <footer class="pos-modal-footer">
@@ -349,6 +366,8 @@
     </template>
     <template v-else-if="actionDialog==='view'">
       <div class="pos-modal-body">
+        <img v-if="page==='products' && productImageUrl(managementView?.image_url)" class="product-view-photo"
+          :src="productImageUrl(managementView.image_url)" alt="Product image">
         <dl class="pos-modal-facts"><div v-for="item in managementDetails(managementView)" :key="item.label"><dt>{{item.label}}</dt><dd>{{item.value}}</dd></div></dl>
       </div>
       <footer class="pos-modal-footer"><button type="button" class="secondary" data-start-focus @click="closeActionDialog()">Close</button></footer>

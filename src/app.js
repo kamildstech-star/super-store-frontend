@@ -2,6 +2,10 @@ const allProducts = {id:'all', name:'All products', icon:'grid', color:'#87657f'
 const sampleOrder = [['MIN-01',2], ['CHP-05',1], ['APL-13',0.5]];
 const allowedShapes = new Set(['bottle','can','carton','bag','box','apple','banana','tomato','orange']);
 const safeColor = (value, fallback) => typeof value==='string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+function productImageUrl(path) {
+ return typeof path==='string' && /^\/api\/pos\/product-images\/\d+\/[A-Za-z0-9]{40}\.(?:jpe?g|png|webp)$/.test(path)
+   ? posApiBaseUrl+path : null;
+}
 function normalizeCatalog(data) {
  const {currency,categories,units,products} = data;
  if(currency!=='PKR' || !Array.isArray(categories) || !Array.isArray(units) || !Array.isArray(products))
@@ -17,7 +21,7 @@ function normalizeCatalog(data) {
         !Number.isSafeInteger(p.price_minor) || p.price_minor<0) throw new Error('The catalog contains an invalid product.');
      const art=p.art??{};
      return {id:p.sku,name:p.name,category:p.category,unit:p.unit,precision:unit.quantity_precision,price:p.price_minor,stock:Number.isSafeInteger(p.stock_milli)?p.stock_milli/1000:null,
-       code:typeof p.internal_code==='string'?p.internal_code:'', barcode:typeof p.barcode==='string'?p.barcode:'',
+       image:productImageUrl(p.image_url),code:typeof p.internal_code==='string'?p.internal_code:'', barcode:typeof p.barcode==='string'?p.barcode:'',
        shape:allowedShapes.has(art.shape)?art.shape:'box',ink:safeColor(art.ink,'#87657f'),
        tone:safeColor(art.tone,'#f4edf3'),label:typeof art.label==='string' && /^[A-Z0-9 ]{0,12}$/.test(art.label)?art.label:''};
    })
@@ -73,10 +77,11 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
  const timer=setTimeout(()=>controller.abort(),12000);
  try {
    const headers={Accept:'application/json'};
-   if(body!==undefined)headers['Content-Type']='application/json';
+   const multipart=body instanceof FormData;
+   if(body!==undefined&&!multipart)headers['Content-Type']='application/json';
    if(csrf)headers['X-CSRF-TOKEN']=csrf;
    const response=await fetch(posApiBaseUrl+path,{method,headers,credentials:'include',
-     body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});
+     body:body===undefined||multipart?body:JSON.stringify(body),signal:controller.signal});
    if(response.status===204)return null;
    const data=await response.json().catch(()=>null);
    if(!response.ok){
@@ -99,7 +104,7 @@ const dialogs = {clear:'Clear order?',new:'New order?',customer:'Customer',note:
 const app = Vue.createApp({
  render: registerRender,
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
-   managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,optionsState:'idle',optionsRequest:0,listRows:[],listMeta:emptyPage(),listQuery:'',listSize:15,listBusy:false,listError:'',listTimer:null,listRequest:0,actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
+   managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,productImageFile:null,productImagePreview:'',productImageRemove:false,productImageError:'',optionsState:'idle',optionsRequest:0,listRows:[],listMeta:emptyPage(),listQuery:'',listSize:15,listBusy:false,listError:'',listTimer:null,listRequest:0,actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
    inventoryLow:false,inventoryNotice:'',inventoryItem:null,stockForm:null,stockError:'',
    stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
@@ -302,6 +307,7 @@ const app = Vue.createApp({
      }
      document.getElementById('action-dialog')?.close();
      this.inventoryItem=null;this.stockForm=null;this.stockError='';this.stockHistoryRequest++;
+     this.resetProductImage();
      this.actionDialog='';this.managementForm=null;this.managementDelete=null;
      this.managementView=null;this.previewedOrder=null;this.previewOrderId=null;
      this.managementError='';this.previewError='';
@@ -397,7 +403,31 @@ const app = Vue.createApp({
        salePrice:row.price_minor===undefined?'':(row.price_minor/100).toFixed(2)}:
        {name:'',internal_code:'',barcode:'',retailPrice:'',salePrice:'',category_id:'',unit_id:'',supplier_id:'',
         is_active:true,slug:'',code:'',quantity_precision:0,email:'',phone:''};
+     this.resetProductImage();
      this.openActionDialog('form');
+   },
+   productImageUrl,
+   resetProductImage(){
+     if(this.productImagePreview)URL.revokeObjectURL(this.productImagePreview);
+     this.productImageFile=null;this.productImagePreview='';this.productImageRemove=false;this.productImageError='';
+   },
+   selectProductImage(event){
+     const file=event.target.files?.[0];
+     if(!file)return;
+     if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>2*1024*1024){
+       this.productImageError='Choose a JPG, PNG or WebP image no larger than 2 MB.';
+       event.target.value='';
+       return;
+     }
+     this.resetProductImage();
+     this.productImageFile=file;
+     this.productImagePreview=URL.createObjectURL(file);
+   },
+   removeProductImage(){
+     this.resetProductImage();
+     this.productImageRemove=Boolean(this.managementForm?.image_url);
+     const input=document.getElementById('management-product-image');
+     if(input)input.value='';
    },
    managementShow(row){
      this.managementView=row;
@@ -434,7 +464,18 @@ const app = Vue.createApp({
      if(resource==='units'){body.quantity_precision=Number(form.quantity_precision);if(!form.id)body.code=form.code.trim().toLowerCase();}
      if(resource==='suppliers'){body.email=form.email?.trim()||null;body.phone=form.phone?.trim()||null;}
      try{
-       const record=await posRequest('/api/pos/management/'+resource+(form.id?'/'+form.id:''),{method:form.id?'PUT':'POST',body,csrf:this.csrf});
+       let payload=body;
+       let method=form.id?'PUT':'POST';
+       if(resource==='products'&&this.productImageRemove)body.remove_image=true;
+       if(resource==='products'&&this.productImageFile){
+         payload=new FormData();
+         for(const [key,value] of Object.entries(body)){
+           payload.append(key,typeof value==='boolean'?(value?'1':'0'):String(value??''));
+         }
+         payload.append('image',this.productImageFile);
+         if(form.id){payload.append('_method','PUT');method='POST';}
+       }
+       const record=await posRequest('/api/pos/management/'+resource+(form.id?'/'+form.id:''),{method,body:payload,csrf:this.csrf});
        this.closeActionDialog(true);
        this.managementNotice='Saved '+record.name+(resource==='products'?' · code '+record.internal_code:'')+'.';
        await this.loadListing();
