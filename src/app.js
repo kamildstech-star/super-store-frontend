@@ -48,11 +48,11 @@ function art({shape,ink:c,label:l}) {
 const format = new Intl.NumberFormat('en-PK',{minimumFractionDigits:2,maximumFractionDigits:2});
 const createLine = (p,qty=1)=>({...p,qty,discount:0});
 const manager = {
- products:{title:'Products',single:'Product',columns:['Internal code','Name','Barcode','Retail Price','Sale Price','Status'],
+ products:{title:'Products',single:'Product',columns:['Image','Internal code','Name','Barcode','Retail Price','Sale Price','Status'],
    fields:[
      {key:'name',label:'Name'},
      {key:'internal_code',label:'Internal code (4 digits)',code:true},
-     {key:'barcode',label:'Barcode (optional)'},
+     {key:'barcode',label:'Barcode (optional)',hint:'Scan into this field or type the code. Product details are entered separately.'},
      {key:'retailPrice',label:'Retail Price (PKR)',hint:'Regular shelf price.',type:'number',min:0,max:999999.99,step:0.01},
      {key:'salePrice',label:'Sale Price (PKR)',hint:'Default price charged at the POS.',type:'number',min:0,max:999999.99,step:0.01},
      {key:'category_id',label:'Category',options:'categories'},
@@ -569,6 +569,69 @@ const app = Vue.createApp({
      if(this.menu&&!event.target.closest?.('[data-header-popover="menu"]'))this.menu=false;
      if(this.profile&&!event.target.closest?.('[data-header-popover="profile"]'))this.profile=false;
    },
+   registerButtons(area){
+     return [...document.querySelectorAll('[data-register-keys="'+area+'"] button[data-key-target]:not(:disabled)')]
+       .filter(button=>button.getClientRects().length);
+   },
+   focusProducts(){
+     const first=this.registerButtons('products')[0];
+     first?.focus();
+   },
+   focusKeypad(){
+     if(!this.activeLine)return;
+     this.mobile='order';
+     this.$nextTick(()=>{
+       const keys=this.registerButtons('keypad');
+       (keys.find(button=>button.textContent.trim()===this.mode)??keys[0])?.focus();
+     });
+   },
+   focusCatalog(){
+     this.mobile='catalog';
+     this.$nextTick(()=>{
+       const first=this.registerButtons('products')[0];
+       (first??document.getElementById('search'))?.focus();
+     });
+   },
+   navigateRegister(event){
+     const key=event.key;
+     const button=event.target?.closest?.('button[data-key-target]');
+     const area=button?.closest('[data-register-keys]')?.dataset.registerKeys;
+     if(!area){
+       if(event.target!==document.body && event.target?.id!=='sale-order-title')return;
+       const initial=this.registerButtons('products')[0]??this.registerButtons('cart')[0];
+       if(initial){event.preventDefault();initial.focus();}
+       return;
+     }
+     event.preventDefault();
+     const items=this.registerButtons(area);
+     if(area==='cart'){
+       if(key==='ArrowRight'){this.focusCatalog();return;}
+       const offset=key==='ArrowUp'?-1:key==='ArrowDown'?1:0;
+       const next=items[items.indexOf(button)+offset];
+       if(offset&&next){next.focus();return;}
+       if(key==='ArrowDown')this.focusKeypad();
+       return;
+     }
+     const rect=button.getBoundingClientRect();
+     const x=rect.left+rect.width/2;
+     const y=rect.top+rect.height/2;
+     const vertical=key==='ArrowUp'||key==='ArrowDown';
+     const sign=key==='ArrowUp'||key==='ArrowLeft'?-1:1;
+     const candidates=items.filter(item=>item!==button).map(item=>{
+       const bounds=item.getBoundingClientRect();
+       const dx=bounds.left+bounds.width/2-x;
+       const dy=bounds.top+bounds.height/2-y;
+       return {item,primary:sign*(vertical?dy:dx),cross:Math.abs(vertical?dx:dy)};
+     }).filter(({primary,cross})=>primary>2&&(vertical||cross<4))
+       .sort((a,b)=>Math.abs(a.primary-b.primary)<4?a.cross-b.cross:a.primary-b.primary);
+     if(candidates.length){candidates[0].item.focus();return;}
+     if(area==='products'&&key==='ArrowLeft')this.focusKeypad();
+     if(area==='keypad'&&key==='ArrowRight')this.focusCatalog();
+     if(area==='keypad'&&key==='ArrowUp'){
+       const cart=this.registerButtons('cart');
+       (cart.find(item=>item.getAttribute('aria-pressed')==='true')??cart.at(-1))?.focus();
+     }
+   },
    keyboard(e){
      if(e.key==='Escape'&&(this.menu||this.profile)){
        const trigger=document.querySelector('[data-header-popover="'+(this.menu?'menu':'profile')+'"] > button');
@@ -578,8 +641,9 @@ const app = Vue.createApp({
        return;
      }
      if(e.target?.closest?.('[data-header-popover] .pos-dropdown'))return;
-     if(!this.user||this.page!=='register'||this.viewedOrder||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||this.dialogName||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName))return;
-     if(e.key==='/'){e.preventDefault();document.getElementById('search')?.focus();}
+     if(!this.user||this.page!=='register'||this.viewedOrder||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||e.target?.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName))return;
+     if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){this.navigateRegister(e);}
+     else if(e.key==='/'){e.preventDefault();document.getElementById('search')?.focus();}
      else if(this.activeLine && /^[0-9.]$/.test(e.key)){e.preventDefault();this.press(e.key);}
      else if(this.activeLine && ['Backspace','Delete'].includes(e.key)){e.preventDefault();this.press(e.key==='Delete'?'−':'Delete');}
    }

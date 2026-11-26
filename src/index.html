@@ -137,6 +137,13 @@
         <thead><tr><th v-for="col in manage.columns" :key="col" scope="col">{{col}}</th><th scope="col">Actions</th></tr></thead>
         <tbody>
           <tr v-for="row in listBusy ? [] : listRows" :key="row.id">
+            <td v-if="page==='products'" class="product-list-image-cell">
+              <span class="product-list-thumbnail">
+                <img v-if="!row.imageUnavailable && productImageUrl(row.image_url)" :src="productImageUrl(row.image_url)" alt="" loading="lazy"
+                  decoding="async" @error="row.imageUnavailable=true">
+                <pos-icon v-else name="archive"></pos-icon>
+              </span>
+            </td>
             <td v-for="(value,index) in rowValues(row)" :key="index">{{value}}</td>
             <td class="mg-row-tools">
               <button type="button" class="secondary action-icon" @click="managementShow(row)" :disabled="managementBusy || !productOptionsReady" :aria-label="'View '+row.name" :title="'View '+row.name"><pos-icon name="view"></pos-icon></button>
@@ -160,12 +167,13 @@
       <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : editingOrder ? 'EDITING SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{saleOrderRef}}</h1></div>
       <button v-if="!viewedOrder && !editingOrder" class="icon-button trash" aria-label="Clear order" title="Clear order" :disabled="!lines.length" @click="openDialog('clear')"><pos-icon name="trash"></pos-icon></button>
     </div>
-    <div class="order-lines" aria-label="Cart items">
+    <div class="order-lines" aria-label="Cart items" data-register-keys="cart">
       <div v-for="line in displayedLines" :key="line.id" class="cart-row" :class="{ selected:!viewedOrder && line.id===selected }">
         <button v-if="!viewedOrder" type="button" class="icon-button cart-remove" @click="remove(line.id)"
           :aria-label="'Remove '+line.name+' from order'" :title="'Remove '+line.name"><pos-icon name="close"></pos-icon></button>
         <component :is="viewedOrder ? 'div' : 'button'" class="order-line" :type="viewedOrder ? undefined : 'button'"
-          :aria-pressed="viewedOrder ? undefined : line.id===selected" @click="!viewedOrder && select(line.id)">
+          :aria-pressed="viewedOrder ? undefined : line.id===selected" :data-key-target="viewedOrder ? undefined : ''"
+          @focus="!viewedOrder && selected!==line.id && select(line.id)" @click="!viewedOrder && select(line.id)">
           <span><strong>{{line.name}}</strong><small>{{quantity(line.qty)}} {{line.unit}} × {{money(line.price)}}<template v-if="line.discount"> · {{line.discount}}% off</template><template v-if="line.locked"> · Unavailable in catalog</template></small></span>
           <strong>{{money(lineTotal(line))}}</strong>
         </component>
@@ -185,8 +193,8 @@
         <button @click="openDialog('customer')"><pos-icon name="user"></pos-icon> {{ customer || 'Customer' }}</button>
         <button @click="openDialog('note')"><pos-icon name="note"></pos-icon> {{ note ? 'Edit note' : 'Order note' }}</button>
       </div>
-      <div class="numpad grid grid-cols-4" aria-label="Order keypad">
-        <button v-for="key in keys" :key="key" :class="{ 'mode-key':modes.includes(key), 'active-mode':mode===key, 'backspace':key==='Delete' }"
+      <div class="numpad grid grid-cols-4" aria-label="Order keypad" data-register-keys="keypad">
+        <button v-for="key in keys" :key="key" data-key-target :class="{ 'mode-key':modes.includes(key), 'active-mode':mode===key, 'backspace':key==='Delete' }"
           :disabled="!activeLine || (activeLine.locked && !['−','Delete'].includes(key)) || (key==='.' && mode==='Qty' && activeLine.precision===0)"
           :aria-label="key==='Delete' ? 'Backspace' : key==='−' ? 'Remove selected item' : key"
           :aria-pressed="modes.includes(key) ? mode===key : undefined" @click="press(key)">
@@ -223,7 +231,7 @@
   <section v-else class="catalog" aria-label="Product catalog">
     <div class="catalog-tools">
       <div class="search-row flex items-center">
-        <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
+        <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch" @keydown.down.prevent="focusProducts"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
         <button type="button" class="secondary scan-focus" @click="clearSearch()" title="Focus the search box, then scan with an Enter-suffix scanner"><pos-icon name="barcode"></pos-icon> Scan barcode</button>
       </div>
       <small v-if="searchStatus" class="scan-status" role="status">{{searchStatus}}</small>
@@ -237,8 +245,8 @@
       <div class="catalog-heading flex items-center justify-between"><h2>{{ categoryName }}</h2><span v-if="catalogState==='ready'">{{ filtered.length }} {{ filtered.length===1 ? 'product' : 'products' }}</span></div>
       <div v-if="catalogState==='loading'" class="no-results" role="status"><strong>Loading catalog…</strong><span>Fetching products from the POS backend.</span></div>
       <div v-else-if="catalogState==='error'" class="no-results"><strong role="alert">Could not load the product catalog</strong><span>Check that the Laravel API is running and reachable.</span><button @click="loadCatalog">Retry</button></div>
-      <div v-else-if="filtered.length" class="product-grid">
-        <button v-for="p in filtered" :key="p.id" class="product" :aria-label="'Add '+p.name" @click="add(p)">
+      <div v-else-if="filtered.length" class="product-grid" data-register-keys="products">
+        <button v-for="p in filtered" :key="p.id" class="product" data-key-target :aria-label="'Add '+p.name" @click="add(p)">
           <div class="product-art" :style="{ '--tone':p.tone }">
             <span class="unit-label">{{ p.unit }}</span>
             <img v-if="p.image" class="product-photo" :src="p.image" alt="" loading="lazy" decoding="async" @error="p.image=null">
@@ -325,7 +333,8 @@
         <input :id="'management-'+field.key" v-else-if="field.type==='checkbox'" type="checkbox" v-model="managementForm[field.key]">
         <input :id="'management-'+field.key" v-else v-model="managementForm[field.key]" :data-start-focus="field.key==='name'?'':undefined" :type="field.type||'text'" :min="field.min" :max="field.max" :step="field.step"
          :required="field.code ? Boolean(managementForm.id) : !field.optional && field.key!=='barcode'"
-         :inputmode="field.code?'numeric':undefined" :maxlength="field.code?4:undefined"
+         :inputmode="field.code?'numeric':undefined" :maxlength="field.code?4:field.key==='barcode'?48:undefined"
+         @keydown.enter="field.key==='barcode' && $event.preventDefault()"
          :pattern="field.code?'[0-9]{4}':field.keyFormat?'[a-z0-9]+(?:-[a-z0-9]+)*':undefined"
          :placeholder="field.code&&!managementForm.id?'Leave blank to generate':undefined">
         <small v-if="field.code && !managementForm.id">Leave blank and Laravel assigns an unused 4-digit code.</small>
@@ -444,7 +453,7 @@
       <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="note=draftNote.trim();closeDialog()">Save note</button></div>
     </template>
     <template v-if="dialogName==='help'">
-      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
+      <dl class="shortcuts"><dt>/</dt><dd>Focus product search</dd><dt>Enter</dt><dd>Add a unique search match or activate the focused button</dd><dt>Arrow keys</dt><dd>Move through products, cart lines and keypad. From the left edge of products, press Left to jump to the keypad.</dd><dt>0–9, .</dt><dd>Use selected keypad mode</dd><dt>Backspace</dt><dd>Delete keypad digit or remove line</dd><dt>Delete</dt><dd>Remove selected line</dd></dl>
     </template>
   </div>
 </dialog>
