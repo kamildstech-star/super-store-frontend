@@ -61,3 +61,9 @@ Run the Laravel migration before using the updated frontend. The register shows 
 3. Open **Purchases** from the top bar or **Purchase Receiving** from Inventory. Choose **Receive stock**, select the actual supplier, and pick products by name, barcode, or product code. Products linked to that supplier appear first. Other active products can still be received without changing their preferred supplier.
 4. Enter received quantity and per-unit cost for each product, and optionally the supplier invoice reference and a note. **Post receipt** increases stock immediately. Open the saved receipt from the supplier-filtered history or from Inventory's stock history.
 5. If the post is not confirmed, retry the original receipt in the same tab instead of entering it again. This records stock and cost, not a supplier payment.
+
+## Customers and receipt display
+
+Use **Customers** in the top bar to create, view, edit, archive, and search customer records. From the register, open **Customer** to search the saved directory by name, phone, or email, or use **Add new customer** to save and select one without leaving the sale. Choose **No customer** to clear the selection. A sale never requires a customer.
+
+The sales receipt keeps a blank Customer value for an unassigned sale, omits Cashier, and displays a compact date and time on one line in Pakistan time. Existing orders keep their saved names. This release requires the matching backend migration.

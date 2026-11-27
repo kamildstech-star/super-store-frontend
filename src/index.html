@@ -386,7 +386,7 @@
               <button class="secondary action-icon" @click="managementStart(row)" :disabled="managementBusy || !productOptionsReady" :aria-label="'Edit '+row.name" :title="'Edit '+row.name"><pos-icon name="edit"></pos-icon></button>
               <button v-if="page!=='products'||row.is_active" class="action-icon icon-delete" type="button" :disabled="managementBusy"
                @click="managementConfirm(row)"
-               :aria-label="(page==='products'?'Archive ':'Delete ')+row.name" :title="(page==='products'?'Archive ':'Delete ')+row.name"><pos-icon name="trash"></pos-icon></button>
+               :aria-label="(archivable?'Archive ':'Delete ')+row.name" :title="(archivable?'Archive ':'Delete ')+row.name"><pos-icon name="trash"></pos-icon></button>
             </td>
           </tr>
           <tr v-if="listBusy || !listRows.length"><td :colspan="manage.columns.length+1">{{listBusy ? 'Loading records…' : listError ? 'Could not load records.' : 'No matching records.'}} <button v-if="listError && !listBusy" type="button" class="order-ref-link" @click="loadListing()">Retry listing</button></td></tr>
@@ -426,7 +426,7 @@
       </div>
       <template v-if="!viewedOrder">
       <div class="order-tools grid grid-cols-2">
-        <button @click="openDialog('customer')"><pos-icon name="user"></pos-icon> {{ customer || 'Customer' }}</button>
+        <button @click="openCustomer"><pos-icon name="user"></pos-icon> {{ customer || 'Customer' }}</button>
         <button @click="openDialog('note')"><pos-icon name="note"></pos-icon> {{ note ? 'Edit note' : 'Order note' }}</button>
       </div>
       <div class="numpad grid grid-cols-4" aria-label="Order keypad" data-register-keys="keypad">
@@ -515,12 +515,50 @@
     <header class="pos-modal-header">
       <div class="pos-modal-badge" :class="{ 'pos-modal-danger':actionDialog==='remove' }"><pos-icon :name="actionIcon"></pos-icon></div>
       <div class="pos-modal-heading">
-        <span class="eyebrow">{{actionDialog==='order' ? 'ORDER HISTORY' : actionDialog.startsWith('purchase-')?'PURCHASE RECEIVING':page==='inventory'?'INVENTORY':manage?.title}}</span>
+        <span class="eyebrow">{{actionDialog==='order' ? 'ORDER HISTORY' : actionDialog==='customer'?'REGISTER':actionDialog.startsWith('purchase-')?'PURCHASE RECEIVING':page==='inventory'?'INVENTORY':manage?.title}}</span>
         <h2 id="action-title">{{actionTitle}}</h2>
       </div>
       <button type="button" class="icon-button pos-modal-close" aria-label="Close popup" @click="closeActionDialog()" :disabled="managementBusy"><pos-icon name="close"></pos-icon></button>
     </header>
-    <form v-if="actionDialog==='purchase-form' && purchaseForm" class="pos-modal-content" @submit.prevent="savePurchase">
+    <template v-if="actionDialog==='customer' && !customerCreateForm">
+      <div class="pos-modal-body customer-picker-body">
+        <p class="pos-modal-description">Choose a saved customer or continue without one.</p>
+        <div class="mg-field">
+          <label for="register-customer">Customer (optional)</label>
+          <pos-search-select input-id="register-customer" label="Customer (optional)" :model-value="customerChoice?.id ?? ''"
+            :retained="customerChoice" :options="customerCandidates" remote :loading="customerLookupBusy" :more="customerHasMore"
+            @search="queueCustomerLookup" @update:model-value="pickCustomer"></pos-search-select>
+        </div>
+        <p v-if="customerLookupError" class="mg-error" role="alert">Customers could not be loaded. <button type="button" class="secondary" @click="queueCustomerLookup(customerSearch)">Retry</button></p>
+      </div>
+      <footer class="pos-modal-footer customer-picker-actions">
+        <button class="secondary" type="button" @click="startCustomerCreate"><pos-icon name="add"></pos-icon> Add new customer</button>
+        <button class="secondary" type="button" @click="pickCustomer('');useCustomer()">No customer</button>
+        <button class="primary" type="button" @click="useCustomer" :disabled="!customerChoice">Use customer</button>
+      </footer>
+    </template>
+    <form v-else-if="actionDialog==='customer' && customerCreateForm" class="pos-modal-content" @submit.prevent="createRegisterCustomer">
+      <div class="pos-modal-body">
+        <p class="pos-modal-description">Save this customer to the directory and select them for the current order.</p>
+        <p v-if="customerCreateError" class="mg-error" role="alert">{{customerCreateError}}</p>
+        <div class="mg-field-grid">
+          <label class="mg-field" for="quick-customer-name">Name
+            <input id="quick-customer-name" v-model.trim="customerCreateForm.name" maxlength="120" required :disabled="managementBusy">
+          </label>
+          <label class="mg-field">Phone (optional)
+            <input type="tel" v-model.trim="customerCreateForm.phone" maxlength="40" :disabled="managementBusy">
+          </label>
+          <label class="mg-field">Email (optional)
+            <input type="email" v-model.trim="customerCreateForm.email" maxlength="254" :disabled="managementBusy">
+          </label>
+        </div>
+      </div>
+      <footer class="pos-modal-footer">
+        <button class="secondary" type="button" @click="customerCreateForm=null;queueCustomerLookup('')" :disabled="managementBusy">Back</button>
+        <button class="primary" type="submit" :disabled="managementBusy">{{managementBusy?'Saving…':'Save and select'}}</button>
+      </footer>
+    </form>
+    <form v-else-if="actionDialog==='purchase-form' && purchaseForm" class="pos-modal-content" @submit.prevent="savePurchase">
       <div class="pos-modal-body purchase-form">
         <p v-if="purchaseError" class="mg-error" role="alert">{{purchaseError}}</p>
         <p class="pos-modal-description">Post the delivery after checking the quantities received. Posting adds stock immediately and does not record a supplier payment.</p>
@@ -639,7 +677,7 @@
         <input :id="'management-'+field.key" v-else-if="field.type==='checkbox'" type="checkbox" v-model="managementForm[field.key]">
         <input :id="'management-'+field.key" v-else v-model="managementForm[field.key]" :data-start-focus="field.key==='name'?'':undefined" :type="field.type||'text'" :min="field.min" :max="field.max" :step="field.step"
          :required="field.code ? Boolean(managementForm.id) : !field.optional && field.key!=='barcode'"
-         :inputmode="field.code?'numeric':undefined" :maxlength="field.code?4:field.key==='barcode'?48:undefined"
+         :inputmode="field.code?'numeric':undefined" :maxlength="field.code?4:field.key==='barcode'?48:field.maxlength"
          @keydown.enter="field.key==='barcode' && $event.preventDefault()"
          :pattern="field.code?'[0-9]{4}':field.keyFormat?'[a-z0-9]+(?:-[a-z0-9]+)*':undefined"
          :placeholder="field.code&&!managementForm.id?'Leave blank to generate':undefined">
@@ -671,12 +709,12 @@
     </form>
     <template v-else-if="actionDialog==='remove' && managementDelete">
       <div class="pos-modal-body">
-        <p class="pos-modal-description">{{page==='products' ? 'This product will no longer appear on the sale screen. Its stock and history remain in Inventory. You can reactivate it by editing the product.' : 'This record will be permanently deleted. This action cannot be undone.'}}</p>
+        <p class="pos-modal-description">{{page==='products' ? 'This product will no longer appear on the sale screen. Its stock and history remain in Inventory. You can reactivate it by editing the product.' : page==='customers' ? 'This customer will no longer appear in the picker. Existing orders and receipts keep the saved customer name.' : 'This record will be permanently deleted. This action cannot be undone.'}}</p>
         <p v-if="managementError" class="mg-error" role="alert">{{managementError}}</p>
       </div>
       <footer class="pos-modal-footer">
         <button type="button" class="secondary" data-start-focus @click="closeActionDialog()" :disabled="managementBusy">Cancel</button>
-        <button type="button" class="danger" @click="managementRemove" :disabled="managementBusy"><pos-icon :name="actionIcon"></pos-icon>{{managementBusy?'Working…':page==='products'?'Archive product':'Delete '+manage.single.toLowerCase()}}</button>
+        <button type="button" class="danger" @click="managementRemove" :disabled="managementBusy"><pos-icon :name="actionIcon"></pos-icon>{{managementBusy?'Working…':(archivable?'Archive ':'Delete ')+manage.single.toLowerCase()}}</button>
       </footer>
     </template>
     <template v-else-if="actionDialog==='view'">
@@ -784,11 +822,6 @@
       <p>Start a new order? The current cart will be replaced.</p>
       <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="startNew(); closeDialog()">New order</button></div>
     </template>
-    <template v-if="dialogName==='customer'">
-      <p>Choose a sample customer for this order.</p>
-      <div class="customer-options"><button v-for="name in ['Walk-in Customer','Ayesha Khan','Ali Raza']" :key="name" @click="customer=name; closeDialog()"><pos-icon name="user"></pos-icon>{{name}}</button></div>
-      <div class="dialog-buttons" v-if="customer"><button @click="customer='';closeDialog()">Remove customer</button></div>
-    </template>
     <template v-if="dialogName==='note'">
       <label for="note">Note for this demo order</label><textarea id="note" v-model="draftNote" maxlength="160" rows="3" placeholder="e.g. Pack items separately"></textarea>
       <div class="dialog-buttons"><button @click="closeDialog">Cancel</button><button class="primary" @click="note=draftNote.trim();closeDialog()">Save note</button></div>
@@ -858,9 +891,8 @@
       <header class="receipt-heading"><h2 id="receipt-heading">Super Store</h2><p>Refund receipt {{refundRef(receiptOrder.refund.id)}}</p></header>
       <dl class="receipt-facts">
         <div><dt>Original sale</dt><dd>{{receiptOrder.refund.order_reference ?? recordRef(receiptOrder.refund.order_id)}}</dd></div>
-        <div v-if="receiptOrder.refund.order_business_date"><dt>Order day (PKT)</dt><dd>{{receiptOrder.refund.order_business_date}}</dd></div>
-        <div><dt>Posted (PKT)</dt><dd>{{receiptDate(receiptOrder.refund.posted_at)}}</dd></div>
-        <div><dt>Cashier</dt><dd>{{receiptOrder.refund.actor}}</dd></div>
+        <div v-if="receiptOrder.refund.order_business_date"><dt>Order day</dt><dd>{{receiptOrder.refund.order_business_date}}</dd></div>
+        <div class="receipt-date"><dt>Date</dt><dd>{{receiptPrintDate(receiptOrder.refund.posted_at)}}</dd></div>
         <div><dt>Reason</dt><dd>{{receiptOrder.refund.reason}}</dd></div>
       </dl>
       <table class="receipt-items">
@@ -878,10 +910,9 @@
         <p>Sales receipt {{orderRef(receiptOrder)}}</p>
       </header>
       <dl class="receipt-facts">
-        <div v-if="receiptOrder.business_date"><dt>Order day (PKT)</dt><dd>{{receiptOrder.business_date}}</dd></div>
-        <div><dt>Date (PKT)</dt><dd>{{receiptDate(receiptOrder.finalized_at)}}</dd></div>
-        <div><dt>Cashier</dt><dd>{{receiptOrder.finalized_cashier || receiptOrder.cashier}}</dd></div>
-        <div><dt>Customer</dt><dd>{{receiptOrder.customer || 'Walk-in'}}</dd></div>
+        <div v-if="receiptOrder.business_date"><dt>Order day</dt><dd>{{receiptOrder.business_date}}</dd></div>
+        <div class="receipt-date"><dt>Date</dt><dd>{{receiptPrintDate(receiptOrder.finalized_at)}}</dd></div>
+        <div><dt>Customer</dt><dd>{{receiptOrder.customer ?? ''}}</dd></div>
       </dl>
       <table class="receipt-items">
         <thead><tr><th scope="col">Item</th><th scope="col">Amount</th></tr></thead>

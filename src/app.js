@@ -74,6 +74,9 @@ const manager = {
  units:{title:'Units',single:'Unit',columns:['Name','Code','Decimal places'],fields:[
    {key:'name',label:'Name'},{key:'code',label:'Unit code (e.g. kg)',creationOnly:true,keyFormat:true},
    {key:'quantity_precision',label:'Decimal places',type:'number',min:0,max:3,step:1}]},
+ customers:{title:'Customers',single:'Customer',icon:'user',columns:['Name','Email','Phone'],fields:[
+   {key:'name',label:'Name',maxlength:120},{key:'email',label:'Email (optional)',type:'email',maxlength:254,optional:true},
+   {key:'phone',label:'Phone (optional)',type:'tel',maxlength:40,optional:true}]},
  suppliers:{title:'Suppliers',single:'Supplier',columns:['Name','Email','Phone','Linked products'],fields:[
    {key:'name',label:'Name'},{key:'email',label:'Email (optional)',type:'email',optional:true},
    {key:'phone',label:'Phone (optional)',type:'tel',optional:true}]},
@@ -120,7 +123,7 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
 }
 
 const pages = [{id:'register',label:'Register'}, {id:'orders',label:'Orders'}, {id:'inventory',label:'Inventory',icon:'archive'}, {id:'purchases',label:'Purchases',icon:'basket'},
-  {id:'reports',label:'Reports',icon:'grid'}, {id:'drawer',label:'Cash drawer',icon:'cash'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
+  {id:'reports',label:'Reports',icon:'grid'}, {id:'drawer',label:'Cash drawer',icon:'cash'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title,icon:item.icon}))];
 const maxCashMinor=9000000000000000;
 const cashStorageKey='super-store.pos.cash.v1:';
 const parseCash=value=>{
@@ -132,8 +135,10 @@ const parseCash=value=>{
 };
 const snapshotLines=lines=>lines.map(({id,name,unit,precision,qty,price,discount})=>({id,name,unit,precision,qty,price,discount}));
 const receiptTime=new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Karachi'});
+const receiptPrintDay=new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'Asia/Karachi'});
+const receiptPrintClock=new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit',hour12:true,timeZone:'Asia/Karachi'});
 const cartStorageKey='super-store.pos.register.v1';
-const dialogs = {recover:'Resolve last submission',scan:'Scan barcode',park:'Park order',clear:'Clear order?',new:'New order?',customer:'Customer',note:'Order note',payment:'Checkout',update:'Save order changes?',discard:'Discard order changes?',help:'Keyboard shortcuts'};
+const dialogs = {recover:'Resolve last submission',scan:'Scan barcode',park:'Park order',clear:'Clear order?',new:'New order?',note:'Order note',payment:'Checkout',update:'Save order changes?',discard:'Discard order changes?',help:'Keyboard shortcuts'};
 const PosRegister = Vue.defineComponent({
  render: registerRender,
  setup: usePosNotifications,
@@ -148,19 +153,21 @@ const PosRegister = Vue.defineComponent({
    returnOrderId:null,returnOrderReference:null,returnOrderBusinessDate:null,returnRows:[],returnHistory:null,returnReason:'',returnError:'',returnQuote:null,returnDrawer:null,returnBusy:false,returnRequest:0,
    purchaseSupplier:'',productSupplier:'',purchaseOptions:[],purchaseOptionsState:'idle',purchaseOptionRequest:0,
    purchaseForm:null,purchaseError:'',purchaseDetail:null,purchaseDetailId:null,purchaseDetailRequest:0,purchaseDetailBusy:false,purchasePending:null,
+   customerChoice:null,customerCandidates:[],customerLookupRequest:0,customerLookupTimer:null,customerSearch:'',customerLookupBusy:false,
+   customerLookupError:false,customerHasMore:false,customerCreateForm:null,customerCreateError:'',
    inventoryLow:false,inventoryStatus:'',inventoryItem:null,stockForm:null,stockError:'',
    stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale',return:'Return restock'},
    paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},cashReceived:'',receiptOrder:null,pendingSubmission:null,
    viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    cartScope:null,cartReady:false,cartStorageError:false,scanCode:'',
-   orderRequestId:null,orderSaving:false,orderSaveError:'',editingOrder:null,parkedDraft:null,editExitPage:'orders',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
+   orderRequestId:null,orderSaving:false,orderSaveError:'',editingOrder:null,parkedDraft:null,editExitPage:'orders',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',customerId:null,note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
    workingCart(){
      const cart=this.editingOrder ? this.parkedDraft : this;
      return this.cartReady&&this.cartScope&&cart ? JSON.stringify({
        scope:this.cartScope,requestId:cart.orderRequestId,
-       customer:cart.customer,note:cart.note,
+       customer:cart.customer,customerId:cart.customerId,note:cart.note,
        lines:snapshotLines(cart.lines),pending:this.pendingSubmission
      }) : null;
    },
@@ -182,16 +189,18 @@ const PosRegister = Vue.defineComponent({
      return this.purchaseForm?.lines.reduce((sum,line)=>sum+this.purchaseLineTotal(line),0n)??0n;
    },
    actionTitle(){
+     if(this.actionDialog==='customer')return this.customerCreateForm?'Add customer':'Customer';
      if(this.actionDialog==='purchase-form')return 'Receive stock';
      if(this.actionDialog==='purchase-detail')return 'Purchase receipt '+this.purchaseRef(this.purchaseDetailId);
      if(this.actionDialog==='stock')return 'Update stock · '+this.inventoryItem?.name;
      if(this.actionDialog==='stock-history')return 'Stock history · '+this.inventoryItem?.name;
      if(this.actionDialog==='order')return this.previewedOrder?'Order '+this.orderRef(this.previewedOrder):'Order details';
      if(this.actionDialog==='view')return this.managementView?.name ?? 'Record details';
-     if(this.actionDialog==='remove')return (this.page==='products'?'Archive ':'Delete ')+(this.managementDelete?.name??'record')+'?';
+     if(this.actionDialog==='remove')return (this.archivable?'Archive ':'Delete ')+(this.managementDelete?.name??'record')+'?';
      return (this.managementForm?.id?'Edit ':'New ')+(this.manage?.single??'record');
    },
-   actionIcon(){return ({order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:'trash',stock:'archive','stock-history':'orders','purchase-form':'archive','purchase-detail':'orders'})[this.actionDialog];},
+   actionIcon(){return ({customer:'user',order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:'trash',stock:'archive','stock-history':'orders','purchase-form':'archive','purchase-detail':'orders'})[this.actionDialog];},
+   archivable(){return ['products','customers'].includes(this.page);},
    categoryName(){return this.categories.find(c=>c.id===this.category)?.name??'All products';},
    manage(){return this.manager[this.page];},
    productOptionsReady(){return this.page!=='products'||this.optionsState==='ready';},
@@ -215,7 +224,7 @@ const PosRegister = Vue.defineComponent({
    document.addEventListener('focusin',this.closeOutsideHeader);
  },
  beforeUnmount(){
-   clearTimeout(this.listTimer);
+   clearTimeout(this.listTimer);clearTimeout(this.customerLookupTimer);
    window.removeEventListener('keydown',this.keyboard);
    document.removeEventListener('pointerdown',this.closeOutsideHeader);
    document.removeEventListener('focusin',this.closeOutsideHeader);
@@ -235,16 +244,16 @@ const PosRegister = Vue.defineComponent({
            sessionStorage.removeItem(cartStorageKey);
          }else{
            this.lines=saved.lines.map(line=>({...line,locked:true}));
-           this.customer=saved.customer;this.note=saved.note;
+           this.customer=saved.customer??'';this.customerId=saved.customerId??null;this.note=saved.note;
            this.orderRequestId=saved.requestId;
            this.select(this.lines[0]?.id??null);
            if(this.lines.length||this.customer||this.note)this.notify('info','Unsaved cart restored in this tab.','Cart restored','cart-restored');
            this.pendingSubmission=saved.pending??null;
            if(this.pendingSubmission?.edit){
-             const {order,lines,customer,note}=this.pendingSubmission.edit;
-             this.parkedDraft={lines:this.lines,selected:this.selected,customer:this.customer,note:this.note,orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer};
+             const {order,lines,customer,customerId,note}=this.pendingSubmission.edit;
+             this.parkedDraft={lines:this.lines,selected:this.selected,customer:this.customer,customerId:this.customerId,note:this.note,orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer};
              this.editingOrder=order;
-             this.lines=lines.map(line=>({...line,locked:true}));this.customer=customer;this.note=note;
+             this.lines=lines.map(line=>({...line,locked:true}));this.customer=customer;this.customerId=customerId??null;this.note=note;
              this.select(this.lines[0]?.id??null);
              this.mobile='order';
            }
@@ -607,6 +616,55 @@ const PosRegister = Vue.defineComponent({
        if(!(await this.expireSession(err))){this.optionsState='error';this.notify('error',err.message,'Could not load form options');}
      }
    },
+   openCustomer(){
+     this.customerChoice=this.customer?{id:this.customerId??'legacy',name:this.customer}:null;
+     this.customerCreateForm=null;this.customerCreateError='';this.openActionDialog('customer');
+     this.queueCustomerLookup('');
+   },
+   queueCustomerLookup(term){
+     const seq=++this.customerLookupRequest;
+     clearTimeout(this.customerLookupTimer);
+     this.customerSearch=term;this.customerCandidates=[];this.customerLookupBusy=true;this.customerLookupError=false;this.customerHasMore=false;
+     this.customerLookupTimer=setTimeout(()=>this.loadCustomers(seq,term),term?230:0);
+   },
+   async loadCustomers(seq,term){
+     try{
+       const result=await posRequest('/api/pos/management/customers?'+new URLSearchParams({q:term.trim(),per_page:'30'}));
+       if(seq!==this.customerLookupRequest)return;
+       this.customerCandidates=result.data;this.customerHasMore=result.meta.total>result.data.length;
+     }catch(err){
+       if(seq===this.customerLookupRequest&&!(await this.expireSession(err))){
+         this.customerLookupError=true;this.notify('error',err.message,'Could not load customers');
+       }
+     }finally{if(seq===this.customerLookupRequest)this.customerLookupBusy=false;}
+   },
+   pickCustomer(id){
+     this.customerChoice=id?this.customerCandidates.find(row=>String(row.id)===String(id))??this.customerChoice:null;
+   },
+   useCustomer(){
+     this.customer=this.customerChoice?.name??'';
+     this.customerId=typeof this.customerChoice?.id==='number'?this.customerChoice.id:null;
+     this.closeActionDialog();
+   },
+   startCustomerCreate(){
+     this.customerCreateError='';this.customerCreateForm={name:'',email:'',phone:''};
+     this.$nextTick(()=>document.getElementById('quick-customer-name')?.focus());
+   },
+   async createRegisterCustomer(){
+     if(this.managementBusy||!this.customerCreateForm)return;
+     this.managementBusy=true;this.customerCreateError='';
+     const form=this.customerCreateForm;
+     try{
+       const record=await posRequest('/api/pos/management/customers',{method:'POST',csrf:this.csrf,
+         body:{name:form.name.trim(),email:form.email.trim()||null,phone:form.phone.trim()||null}});
+       this.customerChoice=record;this.managementBusy=false;
+       this.useCustomer();
+       this.notify('success',record.name+' was added and selected for this order.','Customer added');
+     }catch(err){
+       if(!(await this.expireSession(err)))this.customerCreateError=err.status&&err.status<500?err.message:
+         'Could not confirm the new customer. Go back and search for the name before trying again.';
+     }finally{this.managementBusy=false;}
+   },
    purchaseRef(id){return 'PR-'+String(id).padStart(4,'0');},
    purchaseKey(){return purchaseStorageKey+posApiBaseUrl+':'+this.user.email;},
    readPurchaseRecovery(){
@@ -770,6 +828,10 @@ const PosRegister = Vue.defineComponent({
      }
      document.getElementById('action-dialog')?.close();
      this.inventoryItem=null;this.stockForm=null;this.stockError='';this.stockHistoryRequest++;
+     if(this.actionDialog==='customer'){
+       clearTimeout(this.customerLookupTimer);this.customerLookupRequest++;
+       this.customerCandidates=[];this.customerChoice=null;this.customerCreateForm=null;this.customerCreateError='';
+     }
      this.purchaseDetailRequest++;this.purchaseDetailBusy=false;this.purchaseDetail=null;this.purchaseForm=null;this.purchaseError='';
      this.resetProductImage();
      this.actionDialog='';this.managementForm=null;this.managementDelete=null;
@@ -810,12 +872,12 @@ const PosRegister = Vue.defineComponent({
    openOrderEditor(order){
      this.closeActionDialog(true);
      this.parkedDraft={
-       lines:this.lines,selected:this.selected,customer:this.customer,note:this.note,
+       lines:this.lines,selected:this.selected,customer:this.customer,customerId:this.customerId,note:this.note,
        orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer,
      };
      this.editingOrder={id:order.id,reference:order.reference,business_date:order.business_date,revision:order.revision};
      this.viewedOrder=null;this.page='register';this.mobile='order';
-     this.customer=order.customer??'';this.note=order.note??'';
+     this.customer=order.customer??'';this.customerId=order.customer_id??null;this.note=order.note??'';
      this.lines=order.lines.map(line=>{
        const current=this.catalog.find(product=>product.id===line.sku);
        return {id:line.sku,name:line.name,unit:line.unit,price:line.price_minor,
@@ -842,14 +904,14 @@ const PosRegister = Vue.defineComponent({
      const body={
        ...(edit?{revision:edit.revision,[finalize?'checkout_id':'update_id']:crypto.randomUUID()}:{request_id:this.orderRequestId??=crypto.randomUUID()}),
        ...(finalize?{payment_method:'cash',cash_received_minor:this.cashMinor,cash_session_id:this.paymentDrawer.active?.id??null}:{}),
-       customer:this.customer||null,note:this.note||null,
+       customer:this.customer||null,customer_id:this.customerId,note:this.note||null,
        lines:this.lines.map(l=>({sku:l.id,qty:l.qty,price_minor:l.price,discount:l.discount})),
      };
 
      this.pendingSubmission={
        path:finalize?(edit?'/api/pos/orders/'+edit.id+'/checkout':'/api/pos/checkout'):'/api/pos/orders'+(edit?'/'+edit.id:''),
        method:edit&&!finalize?'PUT':'POST',body,finalize,parking:this.dialogName==='park',
-       total:this.total, edit:edit?{order:{...edit},lines:snapshotLines(this.lines),customer:this.customer,note:this.note}:null,
+       total:this.total, edit:edit?{order:{...edit},lines:snapshotLines(this.lines),customer:this.customer,customerId:this.customerId,note:this.note}:null,
      };
      return this.submitPendingOrder();
    },
@@ -910,6 +972,10 @@ const PosRegister = Vue.defineComponent({
    closeReceipt(){document.getElementById('receipt-dialog')?.close();},
    printReceipt(){if(this.receiptOrder&&document.getElementById('receipt-dialog')?.open)window.print();},
    receiptDate(date){return receiptTime.format(new Date(date));},
+   receiptPrintDate(date){
+     const stamp=new Date(date);
+     return receiptPrintDay.format(stamp)+' '+receiptPrintClock.format(stamp).replace(/[\u00a0\u202f]/g,' ');
+   },
    recordRef(id){return '#'+String(id).padStart(3,'0');},
    orderRef(order){return order.reference??this.recordRef(order.id);},
    managementStart(row=null){
@@ -978,7 +1044,7 @@ const PosRegister = Vue.defineComponent({
      });
      if(resource==='categories'&&!form.id)body.slug=form.slug.trim().toLowerCase();
      if(resource==='units'){body.quantity_precision=Number(form.quantity_precision);if(!form.id)body.code=form.code.trim().toLowerCase();}
-     if(resource==='suppliers'){body.email=form.email?.trim()||null;body.phone=form.phone?.trim()||null;}
+     if(['suppliers','customers'].includes(resource)){body.email=form.email?.trim()||null;body.phone=form.phone?.trim()||null;}
      try{
        let payload=body;
        let method=form.id?'PUT':'POST';
@@ -1006,7 +1072,7 @@ const PosRegister = Vue.defineComponent({
      try{
        await posRequest('/api/pos/management/'+resource+'/'+row.id,{method:'DELETE',csrf:this.csrf});
        this.closeActionDialog(true);
-       this.notify('success',row.name+'.',this.manage.single+(resource==='products'?' archived':' deleted'));
+       this.notify('success',row.name+'.',this.manage.single+(this.archivable?' archived':' deleted'));
        await this.loadListing();
      }catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
      finally{this.managementBusy=false;}
@@ -1015,7 +1081,8 @@ const PosRegister = Vue.defineComponent({
      if(this.page==='products')return [row.internal_code,row.name,row.barcode||'—',this.money(row.retail_price_minor??row.price_minor),this.money(row.price_minor),row.supplier?.name??'—',row.is_active?'Active':'Archived'];
      if(this.page==='categories')return [row.name,row.slug];
      if(this.page==='units')return [row.name,row.code,row.quantity_precision];
-     return [row.name,row.email||'—',row.phone||'—',row.products_count??0];
+     const contact=[row.name,row.email||'—',row.phone||'—'];
+     return this.page==='suppliers'?[...contact,row.products_count??0]:contact;
    },
    async loadCatalog(){
      const scope=this.cartScope;
@@ -1117,7 +1184,7 @@ const PosRegister = Vue.defineComponent({
      });
      this.select(this.lines.at(-1)?.id??null);this.menu=false;
    },
-   clearOrder(){this.orderRequestId=null;this.lines=[];this.select(null);this.customer='';this.note='';},
+   clearOrder(){this.orderRequestId=null;this.lines=[];this.select(null);this.customer='';this.customerId=null;this.note='';},
    newOrder(){this.menu=false;if(this.lines.length||this.note||this.customer){this.openDialog('new');}else this.startNew();},
    startNew(){this.clearOrder();this.mobile='catalog';},
    remove(id=this.selected){
@@ -1351,12 +1418,14 @@ app.component('pos-search-select',{
  props:{
    inputId:{type:String,required:true}, label:{type:String,required:true}, modelValue:[Number,String],
    options:{type:Array,required:true}, required:Boolean, disabled:Boolean,
+   remote:Boolean, loading:Boolean, retained:Object, more:Boolean,
  },
- emits:['update:modelValue'],
+ emits:['update:modelValue','search'],
  data:()=>({open:false,query:'',active:-1}),
  computed:{
-   selected(){return this.options.find(option=>String(option.id)===String(this.modelValue));},
+   selected(){return this.options.find(option=>String(option.id)===String(this.modelValue))??(String(this.retained?.id)===String(this.modelValue)?this.retained:null);},
    matches(){
+     if(this.remote)return this.loading?[]:this.options;
      const words=searchText(this.query).trim().split(/\s+/).filter(Boolean);
      return this.options.filter(option=>{
        const haystack=searchText(option.name+' '+optionMeta(option));
@@ -1365,6 +1434,7 @@ app.component('pos-search-select',{
    },
    listId(){return this.inputId+'-options';},
  },
+   watch:{options(){if(this.remote&&this.open)this.move(this.matches.length?0:-1);}},
  mounted(){this.syncValidity();},
  updated(){this.syncValidity();},
  beforeUnmount(){this.stopTracking();},
@@ -1373,6 +1443,7 @@ app.component('pos-search-select',{
    start(){
      if(this.disabled||this.open)return;
      this.open=true;this.query='';this.active=this.matches.indexOf(this.selected);
+     if(this.remote)this.$emit('search','');
      document.addEventListener('scroll',this.reposition,true);
      document.addEventListener('pointerdown',this.closeOutside,true);
      window.addEventListener('resize',this.reposition);
@@ -1421,6 +1492,7 @@ app.component('pos-search-select',{
    clear(){
      this.$emit('update:modelValue','');
      this.$refs.input.focus();this.start();this.query='';this.active=-1;
+     if(this.remote)this.$emit('search','');
    },
    move(index){
      this.active=index;
@@ -1455,14 +1527,14 @@ app.component('pos-search-select',{
      h('div',{ref:'control',class:{'pos-picker-control':true,'pos-picker-open':this.open}},[
        h(icon,{name:'search'}),
        h('input',{
-         ref:'input',id:this.inputId,type:'text',role:'combobox',autocomplete:'off',spellcheck:false,
+         ref:'input',id:this.inputId,type:'text',role:'combobox',autocomplete:'off',spellcheck:false,maxlength:this.remote?100:undefined,
          disabled:this.disabled,required:this.required,
          'aria-expanded':String(this.open),'aria-controls':this.open?this.listId:undefined,'aria-autocomplete':'list',
          'aria-activedescendant':this.open&&this.active>=0?this.listId+'-'+this.active:undefined,
          value:this.open?this.query:this.selected?.name??'',
          placeholder:this.open?'Type to search…':'Select '+label.toLowerCase()+(this.required?'':' (optional)'),
          onFocus:this.start,onClick:this.start,
-         onInput:event=>{const text=event.target.value;this.start();this.query=text;this.move(this.matches.length?0:-1);},
+         onInput:event=>{const text=event.target.value;this.start();this.query=text;if(this.remote)this.$emit('search',text);this.move(this.matches.length?0:-1);},
          onKeydown:this.onKey,
        }),
        this.selected&&!this.required?h('button',{
@@ -1472,7 +1544,7 @@ app.component('pos-search-select',{
        h(icon,{name:'back',class:'pos-picker-chevron'}),
      ]),
      this.open?h(Vue.Teleport,{to:'#picker-overlays'},[h('div',{ref:'panel',class:'pos-picker-panel'},[
-       h('div',{class:'pos-picker-caption',role:'status'},this.matches.length?
+       h('div',{class:'pos-picker-caption',role:'status'},this.loading?'Searching…':this.more?'Refine your search for more results':this.matches.length?
          this.matches.length+' '+(this.matches.length===1?'option':'options'):
          this.options.length?'No matching options':'No options available'),
        h('ul',{id:this.listId,ref:'list',role:'listbox','aria-label':label},this.open?this.matches.map((option,index)=>{

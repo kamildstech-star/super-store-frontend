@@ -301,3 +301,8 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
  .purchase-line-grid>.mg-field:first-child{grid-column:1/-1}
  .purchase-footer-total{width:100%}
 }
+
+.customer-picker-body{min-height:192px}
+.customer-picker-actions{flex-wrap:wrap}
+.receipt-facts .receipt-date{grid-template-columns:minmax(0,1fr) max-content}
+.receipt-date dd{white-space:nowrap;overflow-wrap:normal;font-variant-numeric:tabular-nums}
