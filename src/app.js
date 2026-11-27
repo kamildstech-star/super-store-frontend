@@ -135,19 +135,19 @@ const PosRegister = Vue.defineComponent({
    cashNotice:'',cashPending:null,cashSubmitting:false,
    drawer:null,drawerHistory:null,drawerMovements:null,drawerMovementSession:null,viewedShift:null,drawerBusy:false,drawerRequest:0,
    openingCash:'',drawerMove:{kind:'in',amount:'',reason:''},closeShift:null,countedCash:'',
-   returnOrderId:null,returnRows:[],returnHistory:null,returnReason:'',returnError:'',returnQuote:null,returnDrawer:null,returnBusy:false,returnRequest:0,
+   returnOrderId:null,returnOrderReference:null,returnOrderBusinessDate:null,returnRows:[],returnHistory:null,returnReason:'',returnError:'',returnQuote:null,returnDrawer:null,returnBusy:false,returnRequest:0,
    inventoryLow:false,inventoryStatus:'',inventoryItem:null,stockForm:null,stockError:'',
    stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale',return:'Return restock'},
    paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},cashReceived:'',receiptOrder:null,pendingSubmission:null,
    viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    cartScope:null,cartReady:false,cartStorageError:false,scanCode:'',
-   orderRequestId:null,orderSaving:false,orderSaveError:'',editingOrder:null,parkedDraft:null,editExitPage:'orders',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,orderNumber:'001',mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
+   orderRequestId:null,orderSaving:false,orderSaveError:'',editingOrder:null,parkedDraft:null,editExitPage:'orders',categories:[allProducts],catalog:[],catalogState:'loading',category:'all',query:'',lines:[],selected:null,mode:'Qty',buffer:'',mobile:'catalog',menu:false,dialogName:'',dialogTitles:dialogs,customer:'',note:'',draftNote:'',keys:['1','2','3','Qty','4','5','6','% Disc','7','8','9','Price','−','0','.','Delete'],modes:['Qty','% Disc','Price']}),
  computed:{
    workingCart(){
      const cart=this.editingOrder ? this.parkedDraft : this;
      return this.cartReady&&this.cartScope&&cart ? JSON.stringify({
-       scope:this.cartScope,requestId:cart.orderRequestId,number:this.orderNumber,
+       scope:this.cartScope,requestId:cart.orderRequestId,
        customer:cart.customer,note:cart.note,
        lines:snapshotLines(cart.lines),pending:this.pendingSubmission
      }) : null;
@@ -160,7 +160,7 @@ const PosRegister = Vue.defineComponent({
    actionTitle(){
      if(this.actionDialog==='stock')return 'Update stock · '+this.inventoryItem?.name;
      if(this.actionDialog==='stock-history')return 'Stock history · '+this.inventoryItem?.name;
-     if(this.actionDialog==='order')return 'Order '+this.orderRef(this.previewedOrder?.id ?? this.previewOrderId);
+     if(this.actionDialog==='order')return this.previewedOrder?'Order '+this.orderRef(this.previewedOrder):'Order details';
      if(this.actionDialog==='view')return this.managementView?.name ?? 'Record details';
      if(this.actionDialog==='remove')return (this.page==='products'?'Archive ':'Delete ')+(this.managementDelete?.name??'record')+'?';
      return (this.managementForm?.id?'Edit ':'New ')+(this.manage?.single??'record');
@@ -178,7 +178,7 @@ const PosRegister = Vue.defineComponent({
        ? this.viewedOrder.lines.map(l=>({id:l.sku,name:l.name,unit:l.unit,qty:l.qty,price:l.price_minor,discount:l.discount,savedTotal:l.total_minor}))
        : this.lines;
    },
-   saleOrderRef(){return this.viewedOrder ? this.orderRef(this.viewedOrder.id) : this.editingOrder ? this.orderRef(this.editingOrder.id) : '#'+this.orderNumber;},
+   saleOrderRef(){const order=this.viewedOrder??this.editingOrder;return order?this.orderRef(order):null;},
    displayedTotal(){return this.viewedOrder?.total_minor ?? this.total;}
  },
  watch:{workingCart(snapshot){if(snapshot!==null)this.persistCart(snapshot);}},
@@ -211,7 +211,6 @@ const PosRegister = Vue.defineComponent({
            this.lines=saved.lines.map(line=>({...line,locked:true}));
            this.customer=saved.customer;this.note=saved.note;
            this.orderRequestId=saved.requestId;
-           this.orderNumber=saved.number;
            this.select(this.lines[0]?.id??null);
            if(this.lines.length||this.customer||this.note)this.notify('info','Unsaved cart restored in this tab.','Cart restored','cart-restored');
            this.pendingSubmission=saved.pending??null;
@@ -286,7 +285,7 @@ const PosRegister = Vue.defineComponent({
      this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';
      this.pendingSubmission=null;this.orderSaveError='';this.dialogName='';document.getElementById('dialog')?.close();
      this.closeReceipt();this.editingOrder=null;this.parkedDraft=null;
-     this.clearOrder();this.orderNumber='001';this.resetListing();
+     this.clearOrder();this.resetListing();
      this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;
    },
    async expireSession(err){
@@ -434,10 +433,11 @@ const PosRegister = Vue.defineComponent({
 
      return this.startCashAction({kind,path,body});
    },
-   async openReturn(orderId){
+   async openReturn(order){
+     const orderId=order.id;
      this.closeActionDialog(true);
      const sequence=++this.returnRequest;
-     this.returnOrderId=orderId;this.returnRows=[];this.returnHistory=null;
+     this.returnOrderId=orderId;this.returnOrderReference=this.orderRef(order);this.returnOrderBusinessDate=order.business_date;this.returnRows=[];this.returnHistory=null;
      this.returnReason='';this.returnError='';this.returnQuote=null;this.returnDrawer=null;this.returnBusy=true;
      await this.$nextTick();
      if(sequence!==this.returnRequest)return;
@@ -450,6 +450,8 @@ const PosRegister = Vue.defineComponent({
          posRequest('/api/pos/cash-drawer'),
        ]);
        if(sequence!==this.returnRequest)return;
+       this.returnOrderReference=options.order_reference??this.returnOrderReference;
+       this.returnOrderBusinessDate=options.order_business_date??this.returnOrderBusinessDate;
        this.returnRows=options.lines.map(row=>({...row,quantity:'',restock:false}));
        this.returnHistory=history;this.returnDrawer=status;
      }catch(err){if(sequence===this.returnRequest&&!(await this.expireSession(err)))this.returnError=err.message;}
@@ -522,9 +524,9 @@ const PosRegister = Vue.defineComponent({
        }else{
          this.viewedShift=attempt.kind==='close'?result:null;
          this.closeShift=null;this.openingCash='';this.countedCash='';this.drawerMove={kind:'in',amount:'',reason:''};
-         this.notify('success',attempt.kind==='open'?'Drawer shift '+this.orderRef(result.id)+' confirmed.':
-           attempt.kind==='close'?'Shift '+this.orderRef(result.id)+' closed. Variance: '+this.reportMoney(result.variance_minor)+'.':
-           'Cash movement '+this.orderRef(result.id)+' recorded.','Cash drawer');
+         this.notify('success',attempt.kind==='open'?'Drawer shift '+this.recordRef(result.id)+' confirmed.':
+           attempt.kind==='close'?'Shift '+this.recordRef(result.id)+' closed. Variance: '+this.reportMoney(result.variance_minor)+'.':
+           'Cash movement '+this.recordRef(result.id)+' recorded.','Cash drawer');
          if(this.page==='drawer')await this.loadDrawer(1,attempt.kind==='close'?result.id:null);
        }
      }catch(err){
@@ -670,7 +672,7 @@ const PosRegister = Vue.defineComponent({
        lines:this.lines,selected:this.selected,customer:this.customer,note:this.note,
        orderRequestId:this.orderRequestId,mobile:this.mobile,mode:this.mode,buffer:this.buffer,
      };
-     this.editingOrder={id:order.id,revision:order.revision};
+     this.editingOrder={id:order.id,reference:order.reference,business_date:order.business_date,revision:order.revision};
      this.viewedOrder=null;this.page='register';this.mobile='order';
      this.customer=order.customer??'';this.note=order.note??'';
      this.lines=order.lines.map(line=>{
@@ -727,15 +729,15 @@ const PosRegister = Vue.defineComponent({
        if(this.workingCart)this.persistCart(this.workingCart);
        await closed;
        if(attempt.parking&&!saved.finalized_at){
-         this.notify('success','Order '+this.orderRef(saved.id)+' can be reopened from Orders.','Order parked');
+         this.notify('success','Order '+this.orderRef(saved)+' can be reopened from Orders.','Order parked');
          this.$nextTick(()=>document.getElementById('search')?.focus());
        }else{
          await this.goPage('orders');
          if(saved.finalized_at){
            this.openReceipt(saved);
-           this.notify('success','Order '+this.orderRef(saved.id)+' paid in cash.','Sale finalized');
+           this.notify('success','Order '+this.orderRef(saved)+' paid in cash.','Sale finalized');
          }else{
-           this.notify('success','Order '+this.orderRef(saved.id)+' '+(attempt.edit?'updated.':'saved as a draft.'),attempt.edit?'Draft updated':'Draft saved');
+           this.notify('success','Order '+this.orderRef(saved)+' '+(attempt.edit?'updated.':'saved as a draft.'),attempt.edit?'Draft updated':'Draft saved');
          }
        }
      }catch(err){
@@ -767,8 +769,8 @@ const PosRegister = Vue.defineComponent({
    closeReceipt(){document.getElementById('receipt-dialog')?.close();},
    printReceipt(){if(this.receiptOrder&&document.getElementById('receipt-dialog')?.open)window.print();},
    receiptDate(date){return receiptTime.format(new Date(date));},
-   orderRef(id){return '#'+String(id).padStart(3,'0');},
-   orderDate(value){return new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value));},
+   recordRef(id){return '#'+String(id).padStart(3,'0');},
+   orderRef(order){return order.reference??this.recordRef(order.id);},
    managementStart(row=null){
      this.managementError='';this.managementDelete=null;
      this.managementForm=row?{...row,
@@ -976,7 +978,7 @@ const PosRegister = Vue.defineComponent({
    },
    clearOrder(){this.orderRequestId=null;this.lines=[];this.select(null);this.customer='';this.note='';},
    newOrder(){this.menu=false;if(this.lines.length||this.note||this.customer){this.openDialog('new');}else this.startNew();},
-   startNew(){this.clearOrder();this.orderNumber=String(Number(this.orderNumber)+1).padStart(3,'0');this.mobile='catalog';},
+   startNew(){this.clearOrder();this.mobile='catalog';},
    remove(id=this.selected){
      const i=this.lines.findIndex(line=>line.id===id);
      if(i<0)return;

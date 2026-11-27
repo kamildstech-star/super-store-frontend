@@ -49,3 +49,7 @@ Open **Reports** in the top bar. Choose Today, Yesterday or a custom date range 
 2. In **Orders**, choose the Returns icon on a finalized cash sale. Enter the returned quantities and reason. Choose **Restock** only for resellable eligible items. **Review refund** shows what the server will record before you confirm. Refund receipts can be reprinted from the order's refund history or Reports.
 3. Open **Cash drawer** from the top bar and enter the counted opening cash. Tracking begins with that first shift. Use **Cash in/out** only for manual movements outside sales or refunds. Select **Start closing count**, enter actual cash, and confirm. The saved close shows the shortage, overage or match. Open a new shift before the next checkout or cash refund once tracking has started.
 4. If a cash write is not confirmed, leave the tab open and click **Retry original cash action**. The retry reference is saved in the same tab. Confirm if cash was physically handed over before paying again. Staff permissions are unchanged.
+
+### Daily order numbers
+
+Run the Laravel migration before using the updated frontend. The register shows **New order** until the first successful save. Then the order and receipt show a four-digit sequence that starts at `#0001` each day at midnight Pakistan time. An older draft keeps its number and original day when reopened or paid. In Orders, search by number or combine date and number, e.g. `2026-11-27 #0001`. Older receipts keep their existing labels.
