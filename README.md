@@ -71,3 +71,7 @@ The sales receipt keeps a blank Customer value for an unassigned sale, omits Cas
 ## Store Settings
 
 Open the **Settings** gear in the top bar. Set the store name and optionally the address, phone, and a receipt footer. The live preview does not change saved settings until you select **Save settings**. New sales and refund receipts use the saved details; old receipts keep their original store identity. Currency (PKR) and timezone (Asia/Karachi) are read-only. Use the matching backend migration before starting the frontend.
+
+### Receipt paper size
+
+In **Settings → Receipt paper size**, choose **58 mm** or **80 mm**, check the preview, and save. This store-wide default applies to sale and refund printing and reprints after reload. It changes the layout, not the recorded sale, refund, or original receipt brand. Choose the same stock size in the browser/printer driver; the POS does not set driver media or a fixed roll length. Test the fit on the actual printer before going live. Run the matching backend migration to enable the setting.

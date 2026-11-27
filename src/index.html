@@ -95,6 +95,14 @@
         <label class="mg-field settings-full">Receipt footer (optional)
           <textarea v-model="settingsForm.receipt_footer" maxlength="180" rows="2" placeholder="e.g. Thank you for shopping with us!" name="receipt-footer"></textarea>
         </label>
+        <div class="mg-field settings-full">
+          <fieldset class="receipt-width-options" aria-describedby="receipt-width-help">
+            <legend>Receipt paper size</legend>
+            <label><input type="radio" name="receipt-width" :value="58" v-model="settingsForm.receipt_width_mm"> 58 mm</label>
+            <label><input type="radio" name="receipt-width" :value="80" v-model="settingsForm.receipt_width_mm"> 80 mm</label>
+          </fieldset>
+          <small id="receipt-width-help">Sets the POS layout. Choose the same paper size in your printer settings.</small>
+        </div>
       </fieldset>
       <p v-if="settingsConflict" class="mg-error" role="alert">
         Settings were changed in another session. Load the saved settings to continue.
@@ -112,15 +120,23 @@
     </form>
     <section class="settings-card settings-preview" aria-labelledby="settings-preview-title">
       <h2 id="settings-preview-title">Receipt preview</h2>
-      <p class="report-caption">Preview only. Save to apply the new details.</p>
-      <article class="receipt-paper settings-receipt-paper">
+      <p class="report-caption">{{settingsValues.receipt_width_mm}} mm layout preview. Save to apply the new details.</p>
+      <article class="receipt-paper receipt-layout settings-receipt-paper" :data-receipt-width="settingsValues.receipt_width_mm">
         <header class="receipt-heading">
           <h3>{{settingsValues.name || 'Store name'}}</h3>
           <p v-if="settingsValues.address" class="receipt-store-address">{{settingsValues.address}}</p>
           <p v-if="settingsValues.phone">Tel: {{settingsValues.phone}}</p>
           <p class="receipt-document-label">Sample sales receipt</p>
         </header>
-        <dl class="receipt-facts receipt-totals"><div><dt>Sample total</dt><dd>Rs. 250.00</dd></div></dl>
+        <dl class="receipt-facts">
+          <div class="receipt-date"><dt>Date</dt><dd>27/11/2026 4:10 PM</dd></div>
+          <div><dt>Customer</dt><dd></dd></div>
+        </dl>
+        <table class="receipt-items">
+          <thead><tr><th scope="col">Item</th><th scope="col">Amount</th></tr></thead>
+          <tbody><tr><td><strong>Basmati Rice</strong><small>1.25 kg × Rs. 200.00</small></td><td>Rs. 250.00</td></tr></tbody>
+        </table>
+        <dl class="receipt-facts receipt-totals"><div><dt><strong>Total</strong></dt><dd><strong>Rs. 250.00</strong></dd></div></dl>
         <p v-if="settingsValues.receipt_footer" class="receipt-store-footer">{{settingsValues.receipt_footer}}</p>
       </article>
     </section>
@@ -943,9 +959,9 @@
     </footer>
   </div>
 </dialog>
-<dialog id="receipt-dialog" class="receipt-dialog" aria-labelledby="receipt-heading" @close="receiptOrder=null">
+<dialog id="receipt-dialog" class="receipt-dialog" :data-receipt-width="activeReceiptWidth" aria-labelledby="receipt-heading" @close="receiptOrder=null">
   <template v-if="receiptOrder">
-    <article v-if="receiptOrder.refund" class="receipt-paper">
+    <article v-if="receiptOrder.refund" class="receipt-paper receipt-layout">
       <header class="receipt-heading">
         <h2 id="receipt-heading">{{receiptBrand.name}}</h2>
         <p v-if="receiptBrand.address" class="receipt-store-address">{{receiptBrand.address}}</p>
@@ -968,7 +984,7 @@
       <dl class="receipt-facts receipt-totals"><div><dt><strong>Cash refund</strong></dt><dd><strong>{{reportMoney(receiptOrder.refund.total_minor)}}</strong></dd></div></dl>
       <p v-if="receiptBrand.receipt_footer" class="receipt-store-footer">{{receiptBrand.receipt_footer}}</p>
     </article>
-    <article v-else class="receipt-paper">
+    <article v-else class="receipt-paper receipt-layout">
       <header class="receipt-heading">
         <h2 id="receipt-heading">{{receiptBrand.name}}</h2>
         <p v-if="receiptBrand.address" class="receipt-store-address">{{receiptBrand.address}}</p>
@@ -1000,6 +1016,7 @@
     </article>
     <p v-if="receiptOrder.payoutReminder" class="receipt-payout">Check whether cash was already handed over before paying this refund.</p>
     <footer class="receipt-actions">
+      <p class="receipt-print-hint">Choose {{activeReceiptWidth}} mm paper in the print dialog.</p>
       <button type="button" class="secondary" @click="closeReceipt">Close receipt</button>
       <button type="button" class="primary" @click="printReceipt" autofocus><pos-icon name="orders"></pos-icon> Print receipt</button>
     </footer>
