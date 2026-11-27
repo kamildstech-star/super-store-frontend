@@ -52,7 +52,7 @@
         <span class="profile-details"><strong>{{user.name}}</strong><small>{{user.email}}</small></span>
       </div>
     </div>
-    <button data-key-target class="pos-nav-button pos-logout" type="button" aria-label="Log out" title="Log out" @click="logout" :disabled="authBusy"><pos-icon name="logout"></pos-icon></button>
+    <button data-key-target class="pos-nav-button pos-logout" type="button" aria-label="Log out" title="Log out" @click="logout" :disabled="authBusy || managementBusy"><pos-icon name="logout"></pos-icon></button>
   </div>
 </header>
 <section v-if="user && pendingSubmission" class="submission-banner" aria-label="Pending order submission">
@@ -62,6 +62,10 @@
 <section v-if="user && cashPending" class="submission-banner" aria-label="Pending cash action">
   <p role="status">{{cashNotice || 'Confirm the original cash action before making another cash entry.'}}</p>
   <button type="button" class="secondary" :disabled="cashSubmitting" @click="retryCashAction">{{cashSubmitting?'Checking…':'Retry original cash action'}}</button>
+</section>
+<section v-if="user && purchasePending" class="submission-banner" aria-label="Pending purchase receipt">
+  <p role="status">Stock receipt not confirmed. Retry the original submission instead of entering it again.</p>
+  <button type="button" class="secondary" :disabled="managementBusy" @click="submitPurchase">{{managementBusy?'Checking…':'Retry original receipt'}}</button>
 </section>
 <p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && cartStorageError" class="cart-recovery" role="status">This browser could not save the working cart. Park it to keep a server copy.</p>
 
@@ -280,12 +284,45 @@
   </template>
 </main>
 
+<main v-if="user && page==='purchases'" class="management-page purchase-page">
+  <div class="mg-page-head">
+    <div><span class="eyebrow">INVENTORY / SUPPLIERS</span><h1>Purchase Receiving</h1></div>
+    <button class="primary" type="button" @click="startPurchase" :disabled="Boolean(purchasePending) || managementBusy || optionsState!=='ready' || purchaseOptionsState!=='ready' || !managementData.suppliers.length || !purchaseOptions.length"><pos-icon name="add"></pos-icon> Receive stock</button>
+  </div>
+  <p v-if="optionsState==='error' || purchaseOptionsState==='error'" class="mg-error" role="alert">Receiving options could not load. <button class="secondary" type="button" @click="loadProductOptions(); loadPurchaseOptions()">Retry</button></p>
+  <p v-else-if="optionsState==='ready' && purchaseOptionsState==='ready' && (!managementData.suppliers.length || !purchaseOptions.length)" class="report-caption">Add a supplier and at least one active product before receiving stock.</p>
+  <section class="mg-list" aria-label="Purchase receipts" :aria-busy="listBusy">
+    <div class="mg-list-tools inventory-tools">
+      <input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" aria-label="Search purchase receipts" placeholder="Receipt number, supplier or invoice…">
+      <label>Supplier
+        <select v-model="purchaseSupplier" @change="loadListing(1)" :disabled="optionsState!=='ready'">
+          <option value="">All suppliers</option><option v-for="supplier in managementData.suppliers" :key="supplier.id" :value="supplier.id">{{supplier.name}}</option>
+        </select>
+      </label>
+      <button class="secondary" type="button" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
+    </div>
+    <div class="mg-table-wrap"><table class="mg-table">
+      <thead><tr><th scope="col">Receipt</th><th scope="col">Posted (PKT)</th><th scope="col">Supplier</th><th scope="col">Invoice / reference</th><th scope="col">Products</th><th scope="col">Cost (PKR)</th><th scope="col">Recorded by</th></tr></thead>
+      <tbody>
+        <tr v-for="row in listBusy?[]:listRows" :key="row.id">
+          <td><button type="button" class="order-ref-link" @click="showPurchase(row.id)">{{purchaseRef(row.id)}}</button></td>
+          <td>{{receiptDate(row.created_at)}}</td><td>{{row.supplier_name}}</td><td>{{row.invoice_reference||'—'}}</td><td>{{row.line_count}}</td><td>{{reportMoney(row.total_minor)}}</td><td>{{row.actor}}</td>
+        </tr>
+        <tr v-if="listBusy || !listRows.length"><td colspan="7">{{listBusy?'Loading receipts…':listError?'Could not load purchase receipts.':'No matching purchase receipts.'}} <button v-if="listError&&!listBusy" class="order-ref-link" type="button" @click="loadListing(1)">Retry listing</button></td></tr>
+      </tbody>
+    </table></div>
+    <pos-table-pagination v-if="!listError" :meta="listMeta" :size="listSize" :busy="listBusy" @page="loadListing" @size="listingSize"></pos-table-pagination>
+  </section>
+</main>
+
 <main v-if="user && page==='inventory'" class="management-page inventory-page">
   <div class="mg-page-head">
     <div><span class="eyebrow">POINT OF SALE</span><h1>Inventory</h1></div>
-    <button type="button" class="secondary" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
+    <div class="mg-actions">
+      <button type="button" class="secondary" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
+      <button type="button" class="primary" @click="goPage('purchases')"><pos-icon name="basket"></pos-icon> Purchase Receiving</button>
+    </div>
   </div>
-  <p v-if="optionsState==='error'" class="mg-error" role="alert">Supplier options could not load. <button type="button" @click="loadProductOptions">Retry</button></p>
   <section class="mg-list" aria-label="Inventory records" :aria-busy="listBusy">
     <div class="mg-list-tools inventory-tools">
       <input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" aria-label="Search inventory" placeholder="Search product, code or barcode…">
@@ -323,7 +360,14 @@
   </div>
   <div v-if="page==='products' && optionsState==='error'" class="mg-error" role="alert">Could not load product form options. <button type="button" @click="loadProductOptions">Retry</button></div>
   <section class="mg-list" aria-label="Management records" :aria-busy="listBusy">
-    <div class="mg-list-tools"><input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" :aria-label="'Search '+manage.title" :placeholder="'Search '+manage.title.toLowerCase()+'…'"></div>
+    <div class="mg-list-tools inventory-tools">
+      <input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" :aria-label="'Search '+manage.title" :placeholder="'Search '+manage.title.toLowerCase()+'…'">
+      <label v-if="page==='products'">Preferred supplier
+        <select v-model="productSupplier" @change="loadListing(1)" :disabled="optionsState!=='ready'">
+          <option value="">All suppliers</option><option v-for="supplier in managementData.suppliers" :key="supplier.id" :value="supplier.id">{{supplier.name}}</option>
+        </select>
+      </label>
+    </div>
     <div class="mg-table-wrap">
       <table class="mg-table">
         <thead><tr><th v-for="col in manage.columns" :key="col" scope="col">{{col}}</th><th scope="col">Actions</th></tr></thead>
@@ -465,34 +509,99 @@
   <button :class="{active:mobile==='order'}" @click="mobile='order'"><pos-icon name="basket"></pos-icon> Order · {{ money(total) }}</button>
 </nav>
 
-<dialog id="action-dialog" class="pos-modal" :class="{ 'pos-modal-wide':['order','form','stock','stock-history'].includes(actionDialog) }" aria-labelledby="action-title" @cancel.prevent="closeActionDialog()">
+<dialog id="action-dialog" class="pos-modal" :class="{ 'pos-modal-wide':['order','form','stock','stock-history','purchase-form','purchase-detail'].includes(actionDialog) }" aria-labelledby="action-title" @cancel.prevent="closeActionDialog()">
   <div v-if="actionDialog" class="pos-modal-shell">
     <div id="picker-overlays"></div>
     <header class="pos-modal-header">
       <div class="pos-modal-badge" :class="{ 'pos-modal-danger':actionDialog==='remove' }"><pos-icon :name="actionIcon"></pos-icon></div>
       <div class="pos-modal-heading">
-        <span class="eyebrow">{{actionDialog==='order' ? 'ORDER HISTORY' : page==='inventory'?'INVENTORY':manage?.title}}</span>
+        <span class="eyebrow">{{actionDialog==='order' ? 'ORDER HISTORY' : actionDialog.startsWith('purchase-')?'PURCHASE RECEIVING':page==='inventory'?'INVENTORY':manage?.title}}</span>
         <h2 id="action-title">{{actionTitle}}</h2>
       </div>
       <button type="button" class="icon-button pos-modal-close" aria-label="Close popup" @click="closeActionDialog()" :disabled="managementBusy"><pos-icon name="close"></pos-icon></button>
     </header>
-    <form v-if="actionDialog==='stock'" class="pos-modal-content" @submit.prevent="saveStock">
+    <form v-if="actionDialog==='purchase-form' && purchaseForm" class="pos-modal-content" @submit.prevent="savePurchase">
+      <div class="pos-modal-body purchase-form">
+        <p v-if="purchaseError" class="mg-error" role="alert">{{purchaseError}}</p>
+        <p class="pos-modal-description">Post the delivery after checking the quantities received. Posting adds stock immediately and does not record a supplier payment.</p>
+        <fieldset class="purchase-fields" :disabled="managementBusy || Boolean(purchasePending)">
+          <div class="mg-field-grid">
+            <div class="mg-field">
+              <label for="purchase-supplier">Supplier</label>
+              <pos-search-select input-id="purchase-supplier" label="Supplier" :options="managementData.suppliers" v-model="purchaseForm.supplier_id" required :disabled="managementBusy || Boolean(purchasePending)"></pos-search-select>
+            </div>
+            <label class="mg-field">Supplier invoice / reference (optional)
+              <input v-model.trim="purchaseForm.invoice_reference" maxlength="80" placeholder="e.g. INV-502">
+            </label>
+          </div>
+          <div class="purchase-lines">
+            <fieldset v-for="(line,index) in purchaseForm.lines" :key="line.key" class="purchase-line">
+              <legend>Product {{index+1}}</legend>
+              <div class="purchase-line-grid">
+                <div class="mg-field">
+                  <label :for="'purchase-product-'+line.key">Product</label>
+                  <pos-search-select :input-id="'purchase-product-'+line.key" label="Product" :options="purchaseLineOptions(line)" :model-value="line.productId" @update:model-value="choosePurchaseProduct(line,$event)" required :disabled="managementBusy || Boolean(purchasePending) || !purchaseForm.supplier_id"></pos-search-select>
+                </div>
+                <label class="mg-field">Received quantity <span v-if="purchaseProduct(line.productId)">({{purchaseProduct(line.productId).unit.code}})</span>
+                  <input type="text" inputmode="decimal" maxlength="14" v-model.trim="line.quantity" required :disabled="!line.productId">
+                </label>
+                <label class="mg-field">Unit cost (PKR)
+                  <input type="text" inputmode="decimal" maxlength="12" v-model.trim="line.cost" required :disabled="!line.productId" placeholder="0.00">
+                </label>
+              </div>
+              <div class="purchase-line-footer">
+                <span>Line total <strong>{{reportMoney(purchaseLineTotal(line))}}</strong></span>
+                <button v-if="purchaseForm.lines.length>1" type="button" class="action-icon icon-delete" @click="purchaseForm.lines.splice(index,1)" :aria-label="'Remove product line '+(index+1)" title="Remove product line"><pos-icon name="trash"></pos-icon></button>
+              </div>
+            </fieldset>
+          </div>
+          <button type="button" class="secondary" @click="addPurchaseLine" :disabled="!purchaseForm.supplier_id || purchaseForm.lines.length>=50"><pos-icon name="add"></pos-icon> Add product</button>
+          <label class="mg-field purchase-note">Note (optional)<textarea v-model.trim="purchaseForm.note" maxlength="240" rows="2"></textarea></label>
+        </fieldset>
+      </div>
+      <footer class="pos-modal-footer purchase-footer">
+        <div class="purchase-footer-total">Total purchase cost <strong>{{reportMoney(purchaseTotal)}}</strong></div>
+        <button type="button" class="secondary" @click="closeActionDialog()" :disabled="managementBusy">{{purchasePending?'Close':'Cancel'}}</button>
+        <button v-if="purchasePending" type="button" class="primary" @click="submitPurchase" :disabled="managementBusy">{{managementBusy?'Posting…':'Retry original receipt'}}</button>
+        <button v-else type="submit" class="primary" :disabled="managementBusy || !purchaseForm.supplier_id">Post receipt</button>
+      </footer>
+    </form>
+    <template v-else-if="actionDialog==='purchase-detail'">
+      <div class="pos-modal-body">
+        <p v-if="purchaseDetailBusy" role="status">Loading purchase receipt…</p>
+        <p v-else-if="purchaseError" class="mg-error" role="alert">{{purchaseError}} <button type="button" class="secondary" @click="loadPurchaseDetail(purchaseDetailId)">Retry</button></p>
+        <template v-else-if="purchaseDetail">
+          <dl class="purchase-summary">
+            <div><dt>Supplier</dt><dd>{{purchaseDetail.supplier_name}}</dd></div>
+            <div><dt>Supplier invoice / reference</dt><dd>{{purchaseDetail.invoice_reference||'—'}}</dd></div>
+            <div><dt>Posted (PKT)</dt><dd>{{receiptDate(purchaseDetail.created_at)}}</dd></div>
+            <div><dt>Recorded by</dt><dd>{{purchaseDetail.actor}}</dd></div>
+          </dl>
+          <p v-if="purchaseDetail.note" class="purchase-detail-note">{{purchaseDetail.note}}</p>
+          <div class="mg-table-wrap"><table class="mg-table stock-history">
+            <thead><tr><th scope="col">Product</th><th scope="col">Received</th><th scope="col">Unit cost</th><th scope="col">Line cost</th></tr></thead>
+            <tbody><tr v-for="line in purchaseDetail.lines" :key="line.id"><td>{{line.name}} <small v-if="line.internal_code">· {{line.internal_code}}</small></td><td>{{quantity(line.quantity_milli/1000)}} {{line.unit}}</td><td>{{reportMoney(line.unit_cost_minor)}}</td><td>{{reportMoney(line.total_minor)}}</td></tr></tbody>
+          </table></div>
+        </template>
+      </div>
+      <footer class="pos-modal-footer purchase-footer">
+        <div v-if="purchaseDetail" class="purchase-footer-total">Total purchase cost <strong>{{reportMoney(purchaseDetail.total_minor)}}</strong></div>
+        <button type="button" class="secondary" @click="closeActionDialog()">Close</button>
+      </footer>
+    </template>
+    <form v-else-if="actionDialog==='stock'" class="pos-modal-content" @submit.prevent="saveStock">
       <div class="pos-modal-body">
         <p v-if="stockError" class="mg-error" role="alert">{{stockError}}</p>
         <p>On hand: <strong>{{quantity(inventoryItem.stock_milli/1000)}} {{inventoryItem.unit.code}}</strong></p>
         <p v-if="!inventoryItem.is_active">Archived products can only have stock removed. Reactivate this product to add stock.</p>
         <div class="mg-field-grid stock-form">
           <label v-if="stockForm.type!=='threshold'" class="mg-field">Movement
-            <select v-model="stockForm.type"><option v-for="(name,type) in stockTypes" v-show="!['sale','return'].includes(type) && (inventoryItem.is_active || ['adjustment','damage'].includes(type))" :key="type" :value="type" :disabled="['sale','return'].includes(type) || (!inventoryItem.is_active && !['adjustment','damage'].includes(type))">{{name}}</option></select>
+            <select v-model="stockForm.type"><option v-for="type in stockFormTypes(inventoryItem)" :key="type" :value="type">{{stockTypes[type]}}</option></select>
           </label>
           <label class="mg-field">{{stockForm.type==='threshold'?'Low-stock threshold':'Quantity'}} ({{inventoryItem.unit.code}})
             <input type="number" v-model="stockForm.quantity" :min="stockForm.type==='adjustment'?-1000000:stockForm.type==='threshold'?0:10 ** -inventoryItem.unit.quantity_precision" :step="10 ** -inventoryItem.unit.quantity_precision" :max="!inventoryItem.is_active && stockForm.type==='adjustment' ? -(10 ** -inventoryItem.unit.quantity_precision) : 1000000" required data-start-focus>
             <small v-if="stockForm.type==='adjustment'">Use a negative quantity to reduce stock.</small>
           </label>
-          <div v-if="stockForm.type==='receipt'" class="mg-field">
-            <label for="stock-supplier">Supplier</label>
-            <pos-search-select input-id="stock-supplier" label="Supplier" :options="managementData.suppliers" v-model="stockForm.supplier_id" required :disabled="managementBusy"></pos-search-select>
-          </div>
           <label v-if="stockForm.type!=='threshold'" class="mg-field">Reason or reference
             <input type="text" v-model.trim="stockForm.reason" maxlength="240" required>
           </label>
@@ -510,7 +619,7 @@
             <tr v-for="item in stockHistoryBusy ? [] : stockHistory" :key="item.id">
               <td>{{receiptDate(item.created_at)}}</td><td>{{stockTypes[item.type]}}</td>
               <td>{{item.delta_milli>0?'+':''}}{{quantity(item.delta_milli/1000)}}</td><td>{{quantity(item.balance_milli/1000)}}</td>
-              <td>{{item.actor}}</td><td>{{item.reason}}<template v-if="item.supplier_name"> · {{item.supplier_name}}</template><template v-if="item.order_id"> · {{item.order?.reference ?? recordRef(item.order_id)}}<template v-if="item.order?.business_date"> ({{item.order.business_date}})</template></template></td>
+              <td>{{item.actor}}</td><td>{{item.reason}}<template v-if="item.supplier_name"> · {{item.supplier_name}}</template><template v-if="item.purchase_receipt_id"> · <button type="button" class="order-ref-link" @click="closeActionDialog(); showPurchase(item.purchase_receipt_id)">{{purchaseRef(item.purchase_receipt_id)}}</button></template><template v-if="item.order_id"> · {{item.order?.reference ?? recordRef(item.order_id)}}<template v-if="item.order?.business_date"> ({{item.order.business_date}})</template></template></td>
             </tr>
             <tr v-if="stockHistoryBusy || !stockHistory.length"><td colspan="6">{{stockHistoryBusy?'Loading history…':'No stock movements.'}}</td></tr>
           </tbody>

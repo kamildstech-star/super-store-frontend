@@ -26,7 +26,7 @@ Management and Orders tables load one server page at a time. Search filters the 
 - Add, replace or remove an optional **Product image** in the Add/Edit popup. The preview is local until saved. Products shows a thumbnail; POS cards display the uploaded photo or the default illustration.
 - Leave the product's **Internal code** blank to generate a random unused four-digit value; edit it later if needed. Barcode is separate.
 - Open **Scan barcode** and scan with a keyboard-mode scanner set to send Enter, or type the full barcode and press Enter. Only an exact barcode match adds to the cart, even if another category is selected. Repeated scans increase quantity subject to stock. In the regular search, Enter can add one exact code match; click a product for partial name matches.
-- Open **Inventory** to enter opening stock, receive supplier stock, adjust quantities and record damage. Set a low-stock threshold per product; **Low stock only** filters the list. Use **Product status** to find active or archived products. Archived products stay off the register but retain the balance and movement history; only stock reductions are allowed until reactivated.
+- Open **Inventory** to enter opening stock, adjust quantities and record damage. Set a low-stock threshold per product; **Low stock only** filters the list. Use **Product status** to find active or archived products. Archived products stay off the register but retain the balance and movement history; only stock reductions are allowed until reactivated.
 - In the product Add/Edit popup, focus **Barcode** and scan with a keyboard-mode scanner. It fills the barcode only and the scanner's Enter does not submit the form. Other product details are entered manually.
 - On the register, press Down to move from search to categories and then products; Up returns. Left from the first product column enters the cart when it has items; Down from its last row reaches the keypad, and Right returns toward products. Left on a cart line focuses its trash button. Enter or Space activates the focused button. Left and Right still move the caret in a nonempty search field.
 - The register checks available stock before adding items or increasing quantity. A blocked attempt leaves the cart unchanged and shows an alert. Final checkout checks stock again on the server, since another cashier may have sold it.
@@ -53,3 +53,11 @@ Open **Reports** in the top bar. Choose Today, Yesterday or a custom date range 
 ### Daily order numbers
 
 Run the Laravel migration before using the updated frontend. The register shows **New order** until the first successful save. Then the order and receipt show a four-digit sequence that starts at `#0001` each day at midnight Pakistan time. An older draft keeps its number and original day when reopened or paid. In Orders, search by number or combine date and number, e.g. `2026-11-27 #0001`. Older receipts keep their existing labels.
+
+## Purchase Receiving
+
+1. Pull both repositories, run `php artisan migrate` in the backend, then restart the frontend.
+2. In **Products**, use Add/Edit to set an optional **Preferred supplier**. The product table shows the link and can be filtered by supplier; **Suppliers** shows the number of linked products.
+3. Open **Purchases** from the top bar or **Purchase Receiving** from Inventory. Choose **Receive stock**, select the actual supplier, and pick products by name, barcode, or product code. Products linked to that supplier appear first. Other active products can still be received without changing their preferred supplier.
+4. Enter received quantity and per-unit cost for each product, and optionally the supplier invoice reference and a note. **Post receipt** increases stock immediately. Open the saved receipt from the supplier-filtered history or from Inventory's stock history.
+5. If the post is not confirmed, retry the original receipt in the same tab instead of entering it again. This records stock and cost, not a supplier payment.
