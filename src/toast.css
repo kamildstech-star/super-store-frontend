@@ -1,0 +1,26 @@
+/* Nuxt UI's utilities, without a second page-wide reset. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "@nuxt/ui";
+
+.pos-toast-viewport {
+  z-index: 40;
+  max-width: calc(100vw - 24px);
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 650px) {
+  .pos-toast-viewport {
+    top: max(68px, calc(env(safe-area-inset-top) + 60px));
+    left: 50%;
+    right: auto;
+    translate: none;
+    transform: translateX(-50%);
+    width: min(390px, calc(100vw - 24px));
+  }
+  dialog .pos-toast-viewport { top: max(12px, env(safe-area-inset-top)); }
+}
+@media print {
+  .pos-toast-viewport { display: none !important; }
+}

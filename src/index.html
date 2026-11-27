@@ -7,8 +7,8 @@
 <title>Point of Sale · Register</title>
 <meta name="description" content="An interactive point-of-sale sale screen with a sample shop catalog.">
 <link rel="stylesheet" href="./style.css">
-<script defer src="./vue.global.prod.js"></script>
-<script defer src="./app.js"></script>
+<link rel="stylesheet" href="./nuxt-ui.css">
+<script type="module" src="./app.js"></script>
 </head>
 <body>
 <div id="app" v-cloak>
@@ -55,26 +55,21 @@
     <button data-key-target class="pos-nav-button pos-logout" type="button" aria-label="Log out" title="Log out" @click="logout" :disabled="authBusy"><pos-icon name="logout"></pos-icon></button>
   </div>
 </header>
-<p v-if="user && authError" class="mg-error" role="alert">{{authError}}</p>
 <section v-if="user && pendingSubmission" class="submission-banner" aria-label="Pending order submission">
   <p role="status">Previous save not confirmed. Resolve it before changing the cart.</p>
   <button type="button" class="secondary" @click="openDialog('recover')">Resolve previous save</button>
 </section>
-<p v-else-if="user && submissionNotice" class="mg-error submission-banner" role="alert">{{submissionNotice}}</p>
 <section v-if="user && cashPending" class="submission-banner" aria-label="Pending cash action">
   <p role="status">{{cashNotice || 'Confirm the original cash action before making another cash entry.'}}</p>
   <button type="button" class="secondary" :disabled="cashSubmitting" @click="retryCashAction">{{cashSubmitting?'Checking…':'Retry original cash action'}}</button>
 </section>
-<p v-else-if="user && cashNotice" class="cart-recovery" role="status">{{cashNotice}}</p>
-<p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && (cartNotice || cartStorageError)" class="cart-recovery" role="status">{{cartStorageError?'This browser could not save the working cart. Park it to keep a server copy.':cartNotice}}</p>
+<p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && cartStorageError" class="cart-recovery" role="status">This browser could not save the working cart. Park it to keep a server copy.</p>
 
 <main v-if="user && page==='orders'" class="management-page orders-page">
   <div class="mg-page-head">
     <div><span class="eyebrow">POINT OF SALE</span><h1>Orders</h1></div>
     <button class="secondary" type="button" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
   </div>
-  <p v-if="savedOrderId" class="mg-notice" role="status">Order {{orderRef(savedOrderId)}} {{saleFinalized?'finalized. Payment method recorded and stock deducted.':(savedOrderEdited?'draft updated.':'saved as draft.')}}</p>
-  <p v-if="ordersError || listError" class="mg-error" role="alert">{{ordersError || listError}}</p>
   <p v-if="orderDetailBusy && !actionDialog" role="status">Loading order…</p>
   <section class="mg-list" aria-label="Saved orders" :aria-busy="listBusy">
     <div class="mg-list-tools"><input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" aria-label="Search orders" placeholder="Order number, cashier or customer…"></div>
@@ -127,10 +122,10 @@
     </label>
     <button type="submit" class="primary" :disabled="listBusy">Apply filters</button>
   </form>
-  <p v-if="ordersError || listError" class="mg-error" role="alert">{{ordersError || listError}}</p>
   <p v-if="orderDetailBusy && !actionDialog" role="status">Loading order…</p>
   <p v-if="listBusy" class="report-caption" role="status">Loading sales report…</p>
-  <template v-else-if="report && !listError">
+  <p v-else-if="listError" class="report-caption">Report unavailable. Use Refresh to try again.</p>
+  <template v-else-if="report">
     <p class="report-caption" role="status">Showing {{report.range.from}}{{report.range.from!==report.range.to?' to '+report.range.to:''}} (PKT){{reportApplied.cashier?' · Cashier filter active':''}}</p>
     <dl class="report-metrics" aria-label="Sales summary">
       <div><dt>Gross sales</dt><dd>{{reportMoney(report.summary.gross_minor)}}</dd></div>
@@ -197,7 +192,6 @@
     <div><span class="eyebrow">POINT OF SALE / REGISTER</span><h1>Cash drawer</h1><p class="report-caption">One shared drawer. A shift can span dates and cashiers.</p></div>
     <button type="button" class="secondary" @click="loadDrawer(drawerHistory?.current_page||1)" :disabled="drawerBusy"><pos-icon name="refresh"></pos-icon> Refresh drawer</button>
   </div>
-  <p v-if="drawerError" class="mg-error" role="alert">{{drawerError}}</p>
   <p v-if="drawerBusy" class="report-caption" role="status">Loading drawer…</p>
   <template v-if="drawer">
     <section v-if="!drawer.active" class="cash-panel" aria-labelledby="opening-heading">
@@ -290,8 +284,6 @@
     <div><span class="eyebrow">POINT OF SALE</span><h1>Inventory</h1></div>
     <button type="button" class="secondary" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
   </div>
-  <p v-if="inventoryNotice" class="mg-notice" role="status">{{inventoryNotice}}</p>
-  <p v-if="listError" class="mg-error" role="alert">{{listError}}</p>
   <p v-if="optionsState==='error'" class="mg-error" role="alert">Supplier options could not load. <button type="button" @click="loadProductOptions">Retry</button></p>
   <section class="mg-list" aria-label="Inventory records" :aria-busy="listBusy">
     <div class="mg-list-tools inventory-tools">
@@ -328,10 +320,7 @@
     <div><span class="eyebrow">POINT OF SALE / MANAGEMENT</span><h1>{{manage.title}}</h1></div>
     <button class="primary" type="button" @click="managementStart()" :disabled="managementBusy || !productOptionsReady">New {{manage.single}}</button>
   </div>
-  <div class="mg-error" role="alert" v-if="managementError && !actionDialog">{{managementError}}</div>
-  <div class="mg-notice" role="status" v-if="managementNotice">{{managementNotice}}</div>
   <div v-if="page==='products' && optionsState==='error'" class="mg-error" role="alert">Could not load product form options. <button type="button" @click="loadProductOptions">Retry</button></div>
-  <div v-if="listError" class="mg-error" role="alert">{{listError}} <button type="button" @click="loadListing()">Retry</button></div>
   <section class="mg-list" aria-label="Management records" :aria-busy="listBusy">
     <div class="mg-list-tools"><input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" :aria-label="'Search '+manage.title" :placeholder="'Search '+manage.title.toLowerCase()+'…'"></div>
     <div class="mg-table-wrap">
@@ -355,7 +344,7 @@
                :aria-label="(page==='products'?'Archive ':'Delete ')+row.name" :title="(page==='products'?'Archive ':'Delete ')+row.name"><pos-icon name="trash"></pos-icon></button>
             </td>
           </tr>
-          <tr v-if="listBusy || !listRows.length"><td :colspan="manage.columns.length+1">{{listBusy ? 'Loading records…' : listError ? 'Could not load records.' : 'No matching records.'}}</td></tr>
+          <tr v-if="listBusy || !listRows.length"><td :colspan="manage.columns.length+1">{{listBusy ? 'Loading records…' : listError ? 'Could not load records.' : 'No matching records.'}} <button v-if="listError && !listBusy" type="button" class="order-ref-link" @click="loadListing()">Retry listing</button></td></tr>
         </tbody>
       </table>
     </div>
@@ -364,7 +353,6 @@
 </main>
 
 <main v-if="user && page==='register'" :inert="Boolean(pendingSubmission)" class="workspace" :class="{ 'show-order': mobile==='order' || viewedOrder, 'view-saved-order': viewedOrder }">
-  <p class="register-stock-notice" role="alert" aria-atomic="true"><span v-if="registerStockNotice">{{registerStockNotice}}</span></p>
   <section class="order-panel" :aria-label="viewedOrder ? 'Saved order items' : 'Current order'">
     <div class="order-head flex items-center justify-between">
       <div><span class="eyebrow">{{viewedOrder ? 'SAVED ORDER' : editingOrder ? 'EDITING SAVED ORDER' : 'CURRENT ORDER'}}</span><h1 id="sale-order-title" tabindex="-1">Order {{saleOrderRef}}</h1></div>
@@ -439,10 +427,9 @@
   <section v-else class="catalog" aria-label="Product catalog">
     <div class="catalog-tools">
       <div class="search-row flex items-center" data-register-keys="search">
-        <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" data-key-target type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @input="searchStatus=''" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
+        <label for="search" class="search-box flex items-center"><pos-icon name="search"></pos-icon><input id="search" data-key-target type="search" placeholder="Name, code or barcode…" aria-label="Search products" v-model="query" @keydown.enter.prevent="addMatch"><kbd v-if="!query">/</kbd><button v-else type="button" class="clear-search" aria-label="Clear search" @click="clearSearch()"><pos-icon name="close"></pos-icon></button></label>
         <button type="button" class="secondary scan-focus" data-key-target @click="openScanner" :disabled="catalogState!=='ready'" title="Scan an exact product barcode"><pos-icon name="barcode"></pos-icon> Scan barcode</button>
       </div>
-      <small v-if="searchStatus" class="scan-status" role="status">{{searchStatus}}</small>
       <div class="category-row" role="group" aria-label="Product categories" data-register-keys="categories">
         <button v-for="c in categories" :key="c.id" class="category" data-key-target :class="{ 'category-active':category===c.id }" :style="{ '--cat':c.color }" :aria-pressed="category===c.id" @click="category=c.id">
           <pos-icon :name="c.icon"></pos-icon> {{ c.name }}
@@ -495,7 +482,7 @@
         <p v-if="!inventoryItem.is_active">Archived products can only have stock removed. Reactivate this product to add stock.</p>
         <div class="mg-field-grid stock-form">
           <label v-if="stockForm.type!=='threshold'" class="mg-field">Movement
-            <select v-model="stockForm.type"><option v-for="(name,type) in stockTypes" v-show="type!=='sale' && (inventoryItem.is_active || ['adjustment','damage'].includes(type))" :key="type" :value="type" :disabled="type==='sale' || (!inventoryItem.is_active && !['adjustment','damage'].includes(type))">{{name}}</option></select>
+            <select v-model="stockForm.type"><option v-for="(name,type) in stockTypes" v-show="!['sale','return'].includes(type) && (inventoryItem.is_active || ['adjustment','damage'].includes(type))" :key="type" :value="type" :disabled="['sale','return'].includes(type) || (!inventoryItem.is_active && !['adjustment','damage'].includes(type))">{{name}}</option></select>
           </label>
           <label class="mg-field">{{stockForm.type==='threshold'?'Low-stock threshold':'Quantity'}} ({{inventoryItem.unit.code}})
             <input type="number" v-model="stockForm.quantity" :min="stockForm.type==='adjustment'?-1000000:stockForm.type==='threshold'?0:10 ** -inventoryItem.unit.quantity_precision" :step="10 ** -inventoryItem.unit.quantity_precision" :max="!inventoryItem.is_active && stockForm.type==='adjustment' ? -(10 ** -inventoryItem.unit.quantity_precision) : 1000000" required data-start-focus>
@@ -593,7 +580,7 @@
     <template v-else-if="actionDialog==='order'">
       <div class="pos-modal-body">
         <p v-if="orderDetailBusy" role="status">Loading order…</p>
-        <p v-else-if="previewError" class="mg-error" role="alert">{{previewError}}</p>
+        <p v-else-if="previewError">Order details are unavailable.</p>
         <template v-else-if="previewedOrder">
           <dl class="pos-modal-facts">
             <div><dt>Date</dt><dd>{{orderDate(previewedOrder.created_at)}}</dd></div>
@@ -630,7 +617,6 @@
         <label class="mg-field" for="barcode-scan-input">Barcode
           <input id="barcode-scan-input" v-model="scanCode" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan or type a barcode" autofocus>
         </label>
-        <p class="barcode-scan-feedback" :class="{'mg-error':scanStatus && scanFailed}" role="status" aria-atomic="true">{{scanStatus}}</p>
         <div class="dialog-buttons"><button type="button" @click="closeDialog">Done</button><button class="primary" type="submit">Add item</button></div>
       </form>
     </template>
@@ -802,6 +788,7 @@
       </dl>
       <p v-if="receiptOrder.payment_method==='cash' && receiptOrder.cash_received_minor==null" class="receipt-legacy">Original cash received and change were not recorded.</p>
     </article>
+    <p v-if="receiptOrder.payoutReminder" class="receipt-payout">Check whether cash was already handed over before paying this refund.</p>
     <footer class="receipt-actions">
       <button type="button" class="secondary" @click="closeReceipt">Close receipt</button>
       <button type="button" class="primary" @click="printReceipt" autofocus><pos-icon name="orders"></pos-icon> Print receipt</button>

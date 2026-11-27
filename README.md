@@ -4,14 +4,18 @@ Odoo-inspired Vue 3 + Tailwind POS. The first page is **Login**; public sign-up 
 
 ## Run
 
-Start the matching Laravel backend on `http://127.0.0.1:8000`. Use its README to migrate your MySQL database and create an account with `php artisan pos:create-user you@example.com`. Then run:
+Start the matching Laravel backend on `http://127.0.0.1:8000`. Use its README to migrate your MySQL database and create an account with `php artisan pos:create-user you@example.com`. Use Node.js 22.12+ (or 20.19+ on the 20.x line), then run:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173`. The dev server builds the app and forwards POS API requests to Laravel on port 8000. Restart it after source changes. Production should serve the built files over HTTPS with the API at the same origin. UI icons use [Remix Icon](https://github.com/Remix-Design/RemixIcon), bundled from the local SVG subset in `src/vendor/remixicon`. No Remix Icon npm package or CDN is needed.
+Open `http://127.0.0.1:4173`. The dev server builds the app and forwards POS API requests to Laravel on port 8000. Restart it after source changes. Production should serve the built files over HTTPS with the API at the same origin. UI icons use [Remix Icon](https://github.com/Remix-Design/RemixIcon). Most are in `src/vendor/remixicon`; toast icons are bundled locally at build time. No icon CDN is required.
+
+## Notifications
+
+The existing Vue frontend uses [Nuxt UI Toast](https://ui.nuxt.com/docs/components/toast); it does not require a Nuxt server. Use the shared `notify(level, message, title, key)` service from `src/notifications.js` for transient feedback. The single toast viewport works on desktop/mobile and moves into any open native dialog. Use a stable key for events that repeat quickly, such as barcode or stock checks. Keep field validation, loading indicators, and payment/refund recovery actions in their forms rather than in expiring toasts.
 
 ## Try
 
