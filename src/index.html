@@ -61,6 +61,11 @@
   <button type="button" class="secondary" @click="openDialog('recover')">Resolve previous save</button>
 </section>
 <p v-else-if="user && submissionNotice" class="mg-error submission-banner" role="alert">{{submissionNotice}}</p>
+<section v-if="user && cashPending" class="submission-banner" aria-label="Pending cash action">
+  <p role="status">{{cashNotice || 'Confirm the original cash action before making another cash entry.'}}</p>
+  <button type="button" class="secondary" :disabled="cashSubmitting" @click="retryCashAction">{{cashSubmitting?'Checking…':'Retry original cash action'}}</button>
+</section>
+<p v-else-if="user && cashNotice" class="cart-recovery" role="status">{{cashNotice}}</p>
 <p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && (cartNotice || cartStorageError)" class="cart-recovery" role="status">{{cartStorageError?'This browser could not save the working cart. Park it to keep a server copy.':cartNotice}}</p>
 
 <main v-if="user && page==='orders'" class="management-page orders-page">
@@ -85,6 +90,8 @@
               :aria-label="'View order '+orderRef(order.id)" :title="'View order '+orderRef(order.id)"><pos-icon name="view"></pos-icon></button>
             <button v-if="order.finalized_at" type="button" class="secondary action-icon" @click.stop="showOrder(order.id,false,false,true)"
               :aria-label="'Receipt for order '+orderRef(order.id)" title="Receipt"><pos-icon name="orders"></pos-icon></button>
+            <button v-if="order.finalized_at && order.payment_method==='cash'" type="button" class="secondary action-icon" @click.stop="openReturn(order.id)"
+              :aria-label="'Returns for order '+orderRef(order.id)" title="Returns"><pos-icon name="back"></pos-icon></button>
             <button v-if="!order.finalized_at" type="button" class="secondary action-icon" @click.stop="showOrder(order.id,false,true)"
               :aria-label="'Edit order '+orderRef(order.id)" :title="'Edit order '+orderRef(order.id)"><pos-icon name="edit"></pos-icon></button>
           </td>
@@ -98,7 +105,7 @@
 
 <main v-if="user && page==='reports'" class="management-page sales-report">
   <div class="mg-page-head">
-    <div><span class="eyebrow">POINT OF SALE / REPORTS</span><h1>Daily Sales Report</h1><p class="report-caption">Finalized sales only · Pakistan time (PKT)</p></div>
+    <div><span class="eyebrow">POINT OF SALE / REPORTS</span><h1>Daily Sales Report</h1><p class="report-caption">Finalized sales and posted refunds · Pakistan time (PKT)</p></div>
     <button type="button" class="secondary" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
   </div>
   <form class="report-filters mg-field-grid" aria-label="Sales report filters" @submit.prevent="applyReport">
@@ -114,7 +121,7 @@
     <label class="mg-field">Cashier
       <select aria-label="Cashier" v-model="reportForm.cashier">
         <option value="">All cashiers</option>
-        <option v-if="reportForm.cashier && !report?.cashiers.some(c=>String(c.id)===reportForm.cashier)" :value="reportForm.cashier">Cashier #{{reportForm.cashier}} (no sales in range)</option>
+        <option v-if="reportForm.cashier && !report?.cashiers.some(c=>String(c.id)===reportForm.cashier)" :value="reportForm.cashier">Cashier #{{reportForm.cashier}} (no activity in range)</option>
         <option v-for="cashier in report?.cashiers??[]" :key="cashier.id" :value="String(cashier.id)">{{cashier.name}}</option>
       </select>
     </label>
@@ -130,11 +137,11 @@
       <div><dt>Discounts</dt><dd>{{reportMoney(report.summary.discount_minor)}}</dd></div>
       <div class="report-primary"><dt>Sales after discounts</dt><dd>{{reportMoney(report.summary.sales_after_discount_minor)}}</dd></div>
       <div><dt>Finalized orders</dt><dd>{{report.summary.order_count}}</dd></div>
-      <div><dt>Refunds</dt><dd class="report-unavailable">Not tracked yet</dd></div>
-      <div><dt>Net sales after refunds</dt><dd class="report-unavailable">Not available yet</dd></div>
+      <div><dt>Refunds</dt><dd>{{report.summary.refunds_minor == null ? 'Not tracked' : reportMoney(report.summary.refunds_minor)}}</dd></div>
+      <div><dt>Net sales after refunds</dt><dd>{{report.summary.net_sales_minor == null ? 'Not available' : reportMoney(report.summary.net_sales_minor)}}</dd></div>
     </dl>
     <section class="report-methods" aria-labelledby="report-methods-heading">
-      <h2 id="report-methods-heading">Payment breakdown</h2>
+      <h2 id="report-methods-heading">Sale payments before refunds</h2>
       <dl v-if="report.payments.length" class="report-payments">
         <div v-for="payment in report.payments" :key="payment.method">
           <dt>{{methodLabel(payment.method)}} <small>· {{payment.order_count}} {{payment.order_count===1?'order':'orders'}}</small></dt>
@@ -143,7 +150,11 @@
       </dl>
       <p v-else class="report-caption">No payments in this selection.</p>
     </section>
-    <section class="mg-list" aria-label="Finalized sales">
+    <div class="mg-actions report-event-switch" aria-label="Report detail">
+      <button type="button" :class="reportKind==='sales'?'primary':'secondary'" :aria-pressed="reportKind==='sales'" @click="setReportKind('sales')">Sales ({{report.summary.order_count}})</button>
+      <button type="button" :class="reportKind==='refunds'?'primary':'secondary'" :aria-pressed="reportKind==='refunds'" @click="setReportKind('refunds')">Refunds ({{report.summary.refund_count??0}})</button>
+    </div>
+    <section v-if="reportKind==='sales'" class="mg-list" aria-label="Finalized sales">
       <div class="mg-table-wrap"><table class="mg-table">
         <thead><tr><th scope="col">Order</th><th scope="col">Finalized (PKT)</th><th scope="col">Cashier</th><th scope="col">Customer</th><th scope="col">Items</th><th scope="col">Payment</th><th scope="col">Total</th><th scope="col">Actions</th></tr></thead>
         <tbody>
@@ -162,6 +173,114 @@
         </tbody>
       </table></div>
       <pos-table-pagination :meta="listMeta" :size="listSize" :busy="listBusy" @page="loadListing" @size="listingSize"></pos-table-pagination>
+    </section>
+    <section v-else class="mg-list" aria-label="Posted refunds">
+      <div class="mg-table-wrap"><table class="mg-table">
+        <thead><tr><th scope="col">Refund</th><th scope="col">Original sale</th><th scope="col">Posted (PKT)</th><th scope="col">Refund cashier</th><th scope="col">Cash refund</th><th scope="col">Actions</th></tr></thead>
+        <tbody>
+          <tr v-for="row in listRows" :key="row.id">
+            <td><button type="button" class="order-ref-link" @click="showRefund(row.id)">{{refundRef(row.id)}}</button></td>
+            <td><button type="button" class="order-ref-link" @click="showOrder(row.order_id,true)">{{orderRef(row.order_id)}}</button></td>
+            <td>{{receiptDate(row.posted_at)}}</td><td>{{row.cashier}}</td><td>{{reportMoney(row.total_minor)}}</td>
+            <td><button type="button" class="secondary action-icon" @click="showRefund(row.id)" :aria-label="'Receipt for '+refundRef(row.id)" title="Refund receipt"><pos-icon name="orders"></pos-icon></button></td>
+          </tr>
+          <tr v-if="!listRows.length"><td colspan="6">No refunds match these filters.</td></tr>
+        </tbody>
+      </table></div>
+      <pos-table-pagination :meta="listMeta" :size="listSize" :busy="listBusy" @page="loadListing" @size="listingSize"></pos-table-pagination>
+    </section>
+  </template>
+</main>
+
+<main v-if="user && page==='drawer'" class="management-page sales-report cash-drawer">
+  <div class="mg-page-head">
+    <div><span class="eyebrow">POINT OF SALE / REGISTER</span><h1>Cash drawer</h1><p class="report-caption">One shared drawer. A shift can span dates and cashiers.</p></div>
+    <button type="button" class="secondary" @click="loadDrawer(drawerHistory?.current_page||1)" :disabled="drawerBusy"><pos-icon name="refresh"></pos-icon> Refresh drawer</button>
+  </div>
+  <p v-if="drawerError" class="mg-error" role="alert">{{drawerError}}</p>
+  <p v-if="drawerBusy" class="report-caption" role="status">Loading drawer…</p>
+  <template v-if="drawer">
+    <section v-if="!drawer.active" class="cash-panel" aria-labelledby="opening-heading">
+      <h2 id="opening-heading">Open cash shift</h2>
+      <p class="report-caption">{{drawer.tracking_enabled?'Open a new shift before taking payments or issuing cash refunds.':'Count the opening float to start tracking the drawer. Previous sales and refunds stay in the Daily Sales Report.'}}</p>
+      <form class="cash-form" @submit.prevent="submitDrawer('open')">
+        <label class="mg-field">Opening cash (PKR)<input v-model="openingCash" inputmode="decimal" maxlength="18" placeholder="0.00" required></label>
+        <button type="submit" class="primary" :disabled="openingMinor===null || drawerBusy || cashPending">Open drawer</button>
+      </form>
+    </section>
+    <template v-else>
+      <p class="report-caption"><strong>Shift {{orderRef(drawer.active.id)}}</strong> · Opened by {{drawer.active.opener}} · {{receiptDate(drawer.active.opened_at)}} (PKT)</p>
+      <dl class="report-metrics" aria-label="Open drawer balance">
+        <div><dt>Opening cash</dt><dd>{{reportMoney(drawer.active.opening_minor)}}</dd></div>
+        <div><dt>Cash sales</dt><dd>{{reportMoney(drawer.active.sales_minor)}}</dd></div>
+        <div><dt>Cash refunds</dt><dd>{{reportMoney(drawer.active.refunds_minor)}}</dd></div>
+        <div><dt>Cash in</dt><dd>{{reportMoney(drawer.active.cash_in_minor)}}</dd></div>
+        <div><dt>Cash out</dt><dd>{{reportMoney(drawer.active.cash_out_minor)}}</dd></div>
+        <div class="report-primary"><dt>Expected cash</dt><dd>{{reportMoney(drawer.active.expected_minor)}}</dd></div>
+      </dl>
+      <div class="drawer-panels">
+        <section class="cash-panel" aria-labelledby="cash-movement-heading">
+          <h2 id="cash-movement-heading">Record cash movement</h2>
+          <p class="report-caption">For cash added or removed outside a sale or refund.</p>
+          <form class="cash-form" @submit.prevent="submitDrawer('move')">
+            <label class="mg-field">Direction<select v-model="drawerMove.kind"><option value="in">Cash in</option><option value="out">Cash out</option></select></label>
+            <label class="mg-field">Amount (PKR)<input v-model="drawerMove.amount" inputmode="decimal" maxlength="18" placeholder="0.00" required></label>
+            <label class="mg-field cash-wide">Reason<input v-model="drawerMove.reason" maxlength="160" placeholder="e.g. Change float" required></label>
+            <button type="submit" class="secondary" :disabled="!movementMinor || !drawerMove.reason.trim() || drawerBusy || cashPending || closeShift">Record movement</button>
+          </form>
+        </section>
+        <section class="cash-panel" aria-labelledby="cash-close-heading">
+          <h2 id="cash-close-heading">Close cash shift</h2>
+          <template v-if="!closeShift">
+            <p class="report-caption">Count the cash physically in the drawer and compare it with the expected balance.</p>
+            <button type="button" class="primary" @click="beginDrawerClose" :disabled="drawerBusy || cashPending">Start closing count</button>
+          </template>
+          <form v-else class="cash-form" @submit.prevent="submitDrawer('close')">
+            <p class="cash-wide report-caption">Closing shift {{orderRef(closeShift.id)}} · Expected {{reportMoney(closeShift.expected_minor)}}</p>
+            <label class="mg-field">Counted cash (PKR)<input v-model="countedCash" inputmode="decimal" maxlength="18" placeholder="0.00" required></label>
+            <p v-if="countedMinor!==null" class="cash-wide" role="status">Variance (counted minus expected): <strong>{{reportMoney(BigInt(countedMinor)-BigInt(closeShift.expected_minor))}}</strong></p>
+            <div class="mg-actions cash-wide">
+              <button class="secondary" type="button" @click="closeShift=null" :disabled="cashPending">Cancel</button>
+              <button class="primary" type="submit" :disabled="countedMinor===null || drawerBusy || cashPending">Confirm close</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </template>
+    <section v-if="drawerMovements" class="mg-list" aria-label="Cash movements">
+      <h2 class="cash-table-heading">Cash movements · shift {{orderRef(drawerMovementSession)}}</h2>
+      <div class="mg-table-wrap"><table class="mg-table">
+        <thead><tr><th scope="col">Date (PKT)</th><th scope="col">Direction</th><th scope="col">Amount</th><th scope="col">Reason</th><th scope="col">Cashier</th></tr></thead>
+        <tbody>
+          <tr v-for="row in drawerMovements.data" :key="row.id"><td>{{receiptDate(row.posted_at)}}</td><td>{{row.kind==='in'?'Cash in':'Cash out'}}</td><td>{{reportMoney(row.amount_minor)}}</td><td>{{row.reason}}</td><td>{{row.actor}}</td></tr>
+          <tr v-if="!drawerMovements.data.length"><td colspan="5">No manual cash movements in this shift.</td></tr>
+        </tbody>
+      </table></div>
+      <div v-if="drawerMovements.last_page>1" class="cash-pager">
+        <button class="secondary" type="button" :disabled="drawerBusy || drawerMovements.current_page<=1" @click="loadDrawer(drawerHistory.current_page,drawerMovementSession,drawerMovements.current_page-1)">Previous movements</button>
+        <button class="secondary" type="button" :disabled="drawerBusy || drawerMovements.current_page>=drawerMovements.last_page" @click="loadDrawer(drawerHistory.current_page,drawerMovementSession,drawerMovements.current_page+1)">Next movements</button>
+      </div>
+    </section>
+    <section v-if="drawerHistory" class="mg-list" aria-label="Closed shifts">
+      <h2 class="cash-table-heading">Closed shifts</h2>
+      <div class="mg-table-wrap"><table class="mg-table">
+        <thead><tr><th scope="col">Shift</th><th scope="col">Opened (PKT)</th><th scope="col">Closed (PKT)</th><th scope="col">Expected</th><th scope="col">Counted</th><th scope="col">Variance</th><th scope="col">Actions</th></tr></thead>
+        <tbody>
+          <tr v-for="shift in drawerHistory.data" :key="shift.id">
+            <td>{{orderRef(shift.id)}}</td><td>{{receiptDate(shift.opened_at)}}<small class="cash-subline">{{shift.opener}}</small></td>
+            <td>{{receiptDate(shift.closed_at)}}<small class="cash-subline">{{shift.closer}}</small></td>
+            <td>{{reportMoney(shift.expected_minor)}}</td><td>{{reportMoney(shift.counted_minor)}}</td>
+            <td><strong>{{reportMoney(shift.variance_minor)}}</strong><small class="cash-subline">{{Number(shift.variance_minor)<0?'Shortage':Number(shift.variance_minor)>0?'Overage':'Balanced'}}</small></td>
+            <td><button type="button" class="secondary action-icon" :aria-label="'View shift '+orderRef(shift.id)" title="View shift" :disabled="drawerBusy" @click="viewShift(shift)"><pos-icon name="view"></pos-icon></button></td>
+          </tr>
+          <tr v-if="!drawerHistory.data.length"><td colspan="7">No closed shifts yet.</td></tr>
+        </tbody>
+      </table></div>
+      <p v-if="viewedShift" class="cash-shift-totals">Shift {{orderRef(viewedShift.id)}} · Opening {{reportMoney(viewedShift.opening_minor)}} · Sales {{reportMoney(viewedShift.sales_minor)}} · Refunds {{reportMoney(viewedShift.refunds_minor)}} · Cash in {{reportMoney(viewedShift.cash_in_minor)}} · Cash out {{reportMoney(viewedShift.cash_out_minor)}}</p>
+      <div v-if="drawerHistory.last_page>1" class="cash-pager">
+        <button class="secondary" type="button" :disabled="drawerBusy || drawerHistory.current_page<=1" @click="loadDrawer(drawerHistory.current_page-1)">Previous shifts</button>
+        <button class="secondary" type="button" :disabled="drawerBusy || drawerHistory.current_page>=drawerHistory.last_page" @click="loadDrawer(drawerHistory.current_page+1)">Next shifts</button>
+      </div>
     </section>
   </template>
 </main>
@@ -291,7 +410,7 @@
       </div>
       <div v-else class="order-edit-actions register-checkout">
         <button type="button" class="secondary" :disabled="!lines.length" @click="openDialog('park')"><pos-icon name="archive"></pos-icon> Park order</button>
-        <button type="button" class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><pos-icon name="card"></pos-icon> Payment</button>
+        <button type="button" class="pay-button" :disabled="!lines.length" @click="openDialog('payment')"><pos-icon name="cash"></pos-icon> Payment</button>
       </div>
       </template>
     </div>
@@ -312,6 +431,7 @@
       <div class="mg-actions">
         <button type="button" class="secondary" @click="goPage('orders')"><pos-icon name="back"></pos-icon> Back to orders</button>
         <button v-if="viewedOrder.finalized_at" type="button" class="secondary" @click="openReceipt(viewedOrder)"><pos-icon name="orders"></pos-icon> Receipt</button>
+        <button v-if="viewedOrder.finalized_at && viewedOrder.payment_method==='cash'" type="button" class="secondary" @click="openReturn(viewedOrder.id)"><pos-icon name="back"></pos-icon> Returns</button>
         <button type="button" class="primary" @click="goPage('register')"><pos-icon name="register"></pos-icon> Return to current sale</button>
       </div>
     </div>
@@ -494,6 +614,7 @@
       <footer class="pos-modal-footer">
         <button type="button" class="secondary" data-start-focus @click="closeActionDialog()">Close</button>
         <button v-if="previewError" type="button" class="secondary" @click="showOrder(previewOrderId,true)"><pos-icon name="refresh"></pos-icon> Retry</button>
+        <button v-if="previewedOrder?.finalized_at && previewedOrder.payment_method==='cash'" type="button" class="secondary" @click="openReturn(previewedOrder.id)"><pos-icon name="back"></pos-icon> Returns</button>
         <button v-if="previewedOrder" type="button" class="primary" @click="openSavedOrder(previewedOrder)"><pos-icon name="register"></pos-icon> Open in sale screen</button>
       </footer>
     </template>
@@ -533,6 +654,11 @@
       <p>Save a draft without changing stock, or record the cash received and finalize the sale.</p>
       <div class="payment-preview"><span>Order {{saleOrderRef}} · {{lines.length}} {{lines.length===1?'line':'lines'}}</span><strong>{{money(total)}}</strong></div>
       <p v-if="orderSaveError" class="mg-error" role="alert">{{orderSaveError}}</p>
+      <p v-if="paymentDrawerError" class="mg-error" role="alert">{{paymentDrawerError}} <button type="button" class="secondary" @click="loadPaymentDrawer">Retry drawer check</button></p>
+      <p v-else-if="!paymentDrawer" class="report-caption" role="status">Checking cash drawer…</p>
+      <p v-else-if="paymentDrawer.tracking_enabled && !paymentDrawer.active" class="mg-error">Cash drawer is closed. Open a shift from the Cash drawer menu to finalize a sale.</p>
+      <p v-else-if="paymentDrawer.active" class="report-caption">Cash shift {{orderRef(paymentDrawer.active.id)}}</p>
+      <p v-if="cashPending" class="mg-error">Resolve the previous cash action before finalizing.</p>
       <div class="cash-tender">
         <label class="mg-field" for="cash-received">Cash received (PKR)
           <input id="cash-received" autofocus v-model="cashReceived" inputmode="decimal" maxlength="18" placeholder="0.00" :disabled="orderSaving" aria-describedby="cash-feedback">
@@ -576,9 +702,80 @@
     </template>
   </div>
 </dialog>
+<dialog id="return-dialog" class="pos-modal return-modal" aria-labelledby="return-heading" @close="returnRequest++;returnOrderId=null;returnQuote=null">
+  <div v-if="returnOrderId" class="pos-modal-shell">
+    <header class="pos-modal-header">
+      <div><span class="eyebrow">POINT OF SALE / ORDERS</span><h2 id="return-heading">Returns · order {{orderRef(returnOrderId)}}</h2></div>
+    </header>
+    <div class="pos-modal-body">
+      <p v-if="returnError" class="mg-error" role="alert">{{returnError}}</p>
+      <p v-if="returnBusy" role="status">Checking return…</p>
+      <p v-if="returnDrawer?.tracking_enabled && !returnDrawer.active" class="mg-error">Open a cash shift before recording a refund.</p>
+      <p v-else-if="returnDrawer?.active" class="report-caption">Refunds will be deducted from cash shift {{orderRef(returnDrawer.active.id)}}.</p>
+      <p v-else-if="returnDrawer" class="report-caption">Drawer tracking has not started. This refund will appear in the Daily Sales Report only.</p>
+      <div v-if="cashPending" class="cash-panel">
+        <p>Do not hand out cash again until you have confirmed the original refund and checked whether it was already paid.</p>
+        <button type="button" class="secondary" @click="retryCashAction" :disabled="cashSubmitting">{{cashSubmitting?'Checking…':'Retry original cash action'}}</button>
+      </div>
+      <template v-else-if="returnQuote">
+        <p><strong>Review the cash refund before posting.</strong> This leaves the original sale unchanged.</p>
+        <ul class="return-quote-lines" aria-label="Refund line breakdown">
+          <li v-for="line in returnQuote.lines" :key="line.line"><span>{{line.name}} · {{quantity(line.qty_milli/1000)}} {{line.unit}} · {{line.restock?'Restock':'No restock'}}</span><strong>{{reportMoney(line.amount_minor)}}</strong></li>
+        </ul>
+        <div class="payment-preview"><span>Cash refund</span><strong>{{reportMoney(returnQuote.total_minor)}}</strong></div>
+        <p class="report-caption">Reason: {{returnQuote.reason}}</p>
+        <p class="report-caption">Record the refund first. Hand over cash only once, after the refund receipt confirms it.</p>
+      </template>
+      <template v-else-if="returnRows.some(row=>row.remaining_milli)">
+        <p class="report-caption">Choose what came back. Restock only items that can be resold.</p>
+        <button class="secondary" type="button" @click="fillReturn" :disabled="returnBusy">Select all remaining</button>
+        <div class="return-items">
+          <div v-for="row in returnRows" :key="row.line" class="return-item">
+            <div><strong>{{row.name}}</strong><small class="cash-subline">{{quantity(row.remaining_milli/1000)}} of {{quantity(row.sold_milli/1000)}} {{row.unit}} remaining</small></div>
+            <label class="mg-field">Return quantity<input :aria-label="'Return quantity for '+row.name" v-model="row.quantity" inputmode="decimal" maxlength="8" placeholder="0" :disabled="!row.remaining_milli || returnBusy"></label>
+            <label class="return-restock"><input type="checkbox" v-model="row.restock" :aria-label="'Restock '+row.name" :disabled="!row.remaining_milli || !row.can_restock || returnBusy"> {{row.can_restock?'Restock':'No restock available'}}</label>
+          </div>
+        </div>
+        <label class="mg-field">Return reason<input v-model="returnReason" maxlength="160" placeholder="e.g. Wrong size" :disabled="returnBusy"></label>
+      </template>
+      <p v-else-if="returnRows.length">All items on this sale have been returned.</p>
+      <section v-if="returnHistory?.data.length" class="return-history" aria-label="Refund history">
+        <h3>Refund history</h3>
+        <ul class="return-quote-lines"><li v-for="item in returnHistory.data" :key="item.id"><button type="button" class="order-ref-link" @click="showRefund(item.id)">{{refundRef(item.id)}}</button><span>{{receiptDate(item.posted_at)}} · {{reportMoney(item.total_minor)}}</span></li></ul>
+        <div v-if="returnHistory.last_page>1" class="cash-pager">
+          <button type="button" class="secondary" :disabled="returnHistory.current_page<=1" @click="refundHistoryPage(returnHistory.current_page-1)">Previous refunds</button>
+          <button type="button" class="secondary" :disabled="returnHistory.current_page>=returnHistory.last_page" @click="refundHistoryPage(returnHistory.current_page+1)">Next refunds</button>
+        </div>
+      </section>
+    </div>
+    <footer class="pos-modal-footer">
+      <button type="button" class="secondary" @click="$event.target.closest('dialog').close()">Close</button>
+      <button v-if="returnQuote && !cashPending" type="button" class="secondary" @click="returnQuote=null">Back to items</button>
+      <button v-if="returnQuote && !cashPending" type="button" class="primary" @click="confirmReturn" :disabled="!returnDrawer || (returnDrawer.tracking_enabled && !returnDrawer.active)">Record cash refund</button>
+      <button v-else-if="!cashPending && returnRows.some(row=>row.remaining_milli)" type="button" class="primary" @click="previewReturn" :disabled="returnBusy">Review refund</button>
+    </footer>
+  </div>
+</dialog>
 <dialog id="receipt-dialog" class="receipt-dialog" aria-labelledby="receipt-heading" @close="receiptOrder=null">
   <template v-if="receiptOrder">
-    <article class="receipt-paper">
+    <article v-if="receiptOrder.refund" class="receipt-paper">
+      <header class="receipt-heading"><h2 id="receipt-heading">Super Store</h2><p>Refund receipt {{refundRef(receiptOrder.refund.id)}}</p></header>
+      <dl class="receipt-facts">
+        <div><dt>Original sale</dt><dd>{{orderRef(receiptOrder.refund.order_id)}}</dd></div>
+        <div><dt>Posted (PKT)</dt><dd>{{receiptDate(receiptOrder.refund.posted_at)}}</dd></div>
+        <div><dt>Cashier</dt><dd>{{receiptOrder.refund.actor}}</dd></div>
+        <div><dt>Reason</dt><dd>{{receiptOrder.refund.reason}}</dd></div>
+      </dl>
+      <table class="receipt-items">
+        <thead><tr><th scope="col">Returned item</th><th scope="col">Refund</th></tr></thead>
+        <tbody><tr v-for="line in receiptOrder.refund.lines" :key="line.line">
+          <td><strong>{{line.name}}</strong><small>{{quantity(line.qty_milli/1000)}} {{line.unit}} · {{line.restock?'Restocked':'Not restocked'}}</small></td>
+          <td>{{reportMoney(line.amount_minor)}}</td>
+        </tr></tbody>
+      </table>
+      <dl class="receipt-facts receipt-totals"><div><dt><strong>Cash refund</strong></dt><dd><strong>{{reportMoney(receiptOrder.refund.total_minor)}}</strong></dd></div></dl>
+    </article>
+    <article v-else class="receipt-paper">
       <header class="receipt-heading">
         <h2 id="receipt-heading">Super Store</h2>
         <p>Sales receipt {{orderRef(receiptOrder.id)}}</p>

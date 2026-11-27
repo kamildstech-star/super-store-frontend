@@ -252,3 +252,29 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .report-payments{display:flex;flex-wrap:wrap;gap:8px 22px;margin:8px 0 0}
 .report-payments dd{margin:2px 0 0;font-weight:750}
 .sales-report .mg-table{min-width:750px}
+
+/* Cash controls share the existing POS table and modal styling. */
+.cash-drawer,.return-modal{overflow-wrap:anywhere}
+.cash-panel{border:1px solid var(--border);border-radius:14px;background:#fff;padding:16px}
+.cash-panel h2,.cash-table-heading,.return-history h3{font-weight:750;margin:0 0 8px}
+.cash-panel .report-caption{margin:0 0 12px}
+.cash-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px}
+.cash-form .mg-field{flex:1 1 130px;max-width:100%}
+.cash-form input,.cash-form select{width:100%}
+.cash-form .cash-wide{flex:1 0 100%;margin:0}
+.drawer-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.cash-drawer .mg-list{margin-top:16px}
+.cash-table-heading,.cash-shift-totals{padding:12px 14px;margin:0}
+.cash-subline{display:block;font-size:.82em;color:#625969}
+.cash-pager,.report-event-switch{display:flex;flex-wrap:wrap;gap:8px;padding:10px}
+.report-event-switch{padding:0;margin:0 0 10px}
+.return-modal{width:min(94vw,620px);max-height:90dvh;overflow:auto}
+.return-items{display:grid;gap:8px;margin:12px 0}
+.return-item{display:grid;grid-template-columns:minmax(0,1fr) minmax(92px,125px) auto;align-items:center;gap:10px;padding:10px;border-radius:10px;background:#f8f5f9}
+.return-item .mg-field input{width:100%}
+.return-restock{display:flex;align-items:center;gap:6px;min-height:34px}
+.return-history{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.return-quote-lines{list-style:none;padding:0;margin:0 0 8px}
+.return-quote-lines li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
+.return-quote-lines strong{white-space:nowrap}
+@media(max-width:650px){.drawer-panels{grid-template-columns:1fr}.return-item{grid-template-columns:minmax(0,1fr) minmax(92px,124px)}.return-item>div{grid-column:1/-1}}

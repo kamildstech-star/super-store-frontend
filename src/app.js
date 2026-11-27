@@ -101,8 +101,16 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
 }
 
 const pages = [{id:'register',label:'Register'}, {id:'orders',label:'Orders'}, {id:'inventory',label:'Inventory',icon:'archive'},
-  {id:'reports',label:'Reports',icon:'grid'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
+  {id:'reports',label:'Reports',icon:'grid'}, {id:'drawer',label:'Cash drawer',icon:'cash'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title}))];
 const maxCashMinor=9000000000000000;
+const cashStorageKey='super-store.pos.cash.v1:';
+const parseCash=value=>{
+ const raw=String(value).trim();
+ if(!/^\d+(?:\.\d{1,2})?$/.test(raw))return null;
+ const [rupees,paisa='']=raw.split('.');
+ const minor=Number(rupees)*100+Number(paisa.padEnd(2,'0'));
+ return Number.isSafeInteger(minor)&&minor<=maxCashMinor?minor:null;
+};
 const snapshotLines=lines=>lines.map(({id,name,unit,precision,qty,price,discount})=>({id,name,unit,precision,qty,price,discount}));
 const receiptTime=new Intl.DateTimeFormat('en-PK',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Karachi'});
 const cartStorageKey='super-store.pos.register.v1';
@@ -112,10 +120,15 @@ const app = Vue.createApp({
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
    managementBusy:false,managementError:'',managementNotice:'',managementForm:null,managementDelete:null,productImageFile:null,productImagePreview:'',productImageRemove:false,productImageError:'',optionsState:'idle',optionsRequest:0,listRows:[],listMeta:emptyPage(),listQuery:'',listSize:15,listBusy:false,listError:'',listTimer:null,listRequest:0,actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
-   reportForm:emptyReportFilters(),reportApplied:emptyReportFilters(),report:null,
+   reportForm:emptyReportFilters(),reportApplied:emptyReportFilters(),report:null,reportKind:'sales',reportPinned:null,
+   paymentDrawer:null,paymentDrawerRequest:0,paymentDrawerError:'',
+   cashNotice:'',cashPending:null,cashSubmitting:false,
+   drawer:null,drawerHistory:null,drawerMovements:null,drawerMovementSession:null,viewedShift:null,drawerBusy:false,drawerError:'',drawerRequest:0,
+   openingCash:'',drawerMove:{kind:'in',amount:'',reason:''},closeShift:null,countedCash:'',
+   returnOrderId:null,returnRows:[],returnHistory:null,returnReason:'',returnError:'',returnQuote:null,returnDrawer:null,returnBusy:false,returnRequest:0,
    inventoryLow:false,inventoryStatus:'',inventoryNotice:'',inventoryItem:null,stockForm:null,stockError:'',
    registerStockNotice:'',registerStockTimer:null,stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
-   stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale'},
+   stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale',return:'Return restock'},
    paymentMethods:{cash:'Cash',card:'Card',bank_transfer:'Bank transfer'},cashReceived:'',saleFinalized:false,receiptOrder:null,pendingSubmission:null,submissionNotice:'',
    ordersError:'',viewedOrder:null,orderDetailBusy:false,orderDetailRequest:0,
    cartScope:null,cartReady:false,cartNotice:'',cartStorageError:false,scanCode:'',scanStatus:'',scanFailed:false,
@@ -129,14 +142,11 @@ const app = Vue.createApp({
        lines:snapshotLines(cart.lines),pending:this.pendingSubmission
      }) : null;
    },
-   cashMinor(){
-     const raw=String(this.cashReceived).trim();
-     if(!/^\d+(?:\.\d{1,2})?$/.test(raw))return null;
-     const [rupees,paisa='']=raw.split('.');
-     const minor=Number(rupees)*100+Number(paisa.padEnd(2,'0'));
-     return Number.isSafeInteger(minor)&&minor<=maxCashMinor?minor:null;
-   },
-   canFinalize(){return this.cashMinor!==null&&this.cashMinor>=this.total;},
+   cashMinor(){return parseCash(this.cashReceived);},
+   openingMinor(){return parseCash(this.openingCash);},
+   movementMinor(){return parseCash(this.drawerMove.amount);},
+   countedMinor(){return parseCash(this.countedCash);},
+   canFinalize(){return !this.cashPending&&this.paymentDrawer!==null&&(!this.paymentDrawer.tracking_enabled||Boolean(this.paymentDrawer.active))&&this.cashMinor!==null&&this.cashMinor>=this.total;},
    actionTitle(){
      if(this.actionDialog==='stock')return 'Update stock · '+this.inventoryItem?.name;
      if(this.actionDialog==='stock-history')return 'Stock history · '+this.inventoryItem?.name;
@@ -223,6 +233,7 @@ const app = Vue.createApp({
        this.csrf=data.csrf_token;
        this.user=data.user;
        this.restoreCart(data.cart_scope);
+       this.readCashRecovery();
        this.authState=this.user?'ready':'guest';
        if(this.user)await this.loadCatalog();
      }catch(err){this.authState='unavailable';this.authError=err.message;}
@@ -233,6 +244,7 @@ const app = Vue.createApp({
        const data=await posRequest('/api/pos/auth/login',{method:'POST',csrf:this.csrf,body:this.loginForm});
        this.user=data.user;this.csrf=data.csrf_token;this.authState='ready';
        this.restoreCart(data.cart_scope);
+       this.readCashRecovery();
        this.loginForm={email:'',password:''};
        await this.loadCatalog();
      }catch(err){
@@ -242,6 +254,7 @@ const app = Vue.createApp({
      }finally{this.authBusy=false;}
    },
    async logout(){
+     if(this.cashPending){this.cashNotice="Resolve the pending cash action before logging out.";return;}
      if(this.editingOrder){this.requestEditExit('logout');return;}
      this.authBusy=true;this.authError='';
      try{
@@ -253,6 +266,9 @@ const app = Vue.createApp({
    },
    resetAuth(){
      this.closeActionDialog(true);
+     document.getElementById('return-dialog')?.close();
+     this.returnRequest++;this.drawerRequest++;this.paymentDrawerRequest++;this.cashPending=null;this.cashNotice='';
+     this.drawer=null;this.viewedShift=null;this.drawerHistory=null;this.drawerMovements=null;this.closeShift=null;this.returnQuote=null;this.returnRows=[];
      this.cartReady=false;this.cartScope=null;this.cartNotice='';
      this.user=null;this.authState='guest';this.profile=false;this.menu=false;
      this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
@@ -277,12 +293,13 @@ const app = Vue.createApp({
      this.managementForm=null;this.managementDelete=null;this.managementError='';this.managementNotice='';
      this.resetListing();this.ordersError='';
      if(page==='register'){await this.loadCatalog();return;}
+     if(page==='drawer'){this.closeShift=null;this.viewedShift=null;await this.loadDrawer();return;}
      await Promise.all([this.loadListing(1), ...(['products','inventory'].includes(page)?[this.loadProductOptions()]:[])]);
    },
    resetListing(){
      clearTimeout(this.listTimer);this.listRequest++;this.optionsRequest++;
      this.listRows=[];this.listMeta=emptyPage();this.listQuery='';this.listBusy=false;this.listError='';
-     this.reportForm=emptyReportFilters();this.reportApplied=emptyReportFilters();this.report=null;
+     this.reportForm=emptyReportFilters();this.reportApplied=emptyReportFilters();this.report=null;this.reportKind='sales';this.reportPinned=null;
      this.managementData=emptyManagement();this.optionsState='idle';this.inventoryLow=false;this.inventoryStatus='';this.inventoryNotice='';
    },
    listingSearch(query){
@@ -301,8 +318,11 @@ const app = Vue.createApp({
      const params=new URLSearchParams({page:String(page),per_page:String(this.listSize),q:this.listQuery.trim()});
      if(resource==='reports'){
        const {period,from,to,cashier}=this.reportApplied;
-       params.set('period',period);
-       if(period==='custom'){params.set('from',from);params.set('to',to);}
+       params.set('period',this.reportPinned?'custom':period);
+       if(this.reportPinned||period==='custom'){
+         params.set('from',this.reportPinned?.from??from);params.set('to',this.reportPinned?.to??to);
+       }
+       params.set('kind',this.reportKind);
        if(cashier)params.set('cashier_id',cashier);
      }
      if(resource==='inventory'){
@@ -313,6 +333,7 @@ const app = Vue.createApp({
      try{
        const result=await posRequest(path+'?'+params);
        if(request!==this.listRequest)return;
+       if(resource==='reports')this.reportPinned=result.range;
        if(page>result.meta.last_page){await this.loadListing(result.meta.last_page);return;}
        this.listRows=result.data;this.listMeta=result.meta;
        if(resource==='reports')this.report=result;
@@ -331,7 +352,7 @@ const app = Vue.createApp({
      this.reportForm.cashier='';
    },
    applyReport(){
-     this.reportApplied={...this.reportForm};
+     this.reportPinned=null;this.reportApplied={...this.reportForm};
      return this.loadListing(1);
    },
    reportMoney(amount){
@@ -340,6 +361,197 @@ const app = Vue.createApp({
      return (minor<0n?'−':'')+'Rs. '+reportInteger.format(abs/100n)+'.'+String(abs%100n).padStart(2,'0');
    },
    methodLabel(method){return this.paymentMethods[method]??'Not recorded';},
+   readCashRecovery(){
+     if(!this.user)return;
+     try {
+       const raw=sessionStorage.getItem(cashStorageKey+this.user.email);
+       this.cashPending=raw?JSON.parse(raw):null;
+       if(this.cashPending)this.cashNotice='A cash action is awaiting confirmation. Retry its original submission.';
+     }catch{this.cashNotice='This browser cannot restore cash actions in this tab.';}
+   },
+   async loadPaymentDrawer(){
+     const sequence=++this.paymentDrawerRequest;
+     this.paymentDrawer=null;this.paymentDrawerError='';
+     try{
+       const status=await posRequest('/api/pos/cash-drawer');
+       if(sequence===this.paymentDrawerRequest)this.paymentDrawer=status;
+     }catch(err){
+       if(sequence===this.paymentDrawerRequest&&!(await this.expireSession(err)))this.paymentDrawerError=err.message;
+     }
+   },
+   async loadDrawer(page=1, session=null, movementPage=1){
+     const sequence=++this.drawerRequest;
+     this.drawerBusy=true;this.drawerError='';
+     try{
+       const [status,history]=await Promise.all([posRequest('/api/pos/cash-drawer'),posRequest('/api/pos/cash-drawer/history?page='+page)]);
+       if(sequence!==this.drawerRequest)return;
+       this.drawer=status;this.drawerHistory=history;
+       const target=session??status.active?.id;
+       this.drawerMovementSession=target??null;
+       this.drawerMovements=null;
+       if(target){
+         const result=await posRequest('/api/pos/cash-drawer/'+target+'/movements?page='+movementPage);
+         if(sequence===this.drawerRequest)this.drawerMovements=result;
+       }
+     }catch(err){if(sequence===this.drawerRequest&&!(await this.expireSession(err)))this.drawerError=err.message;}
+     finally{if(sequence===this.drawerRequest)this.drawerBusy=false;}
+   },
+   viewShift(shift){
+     this.viewedShift=shift;return this.loadDrawer(this.drawerHistory.current_page,shift.id);
+   },
+   beginDrawerClose(){
+     if(!this.drawer?.active||this.cashPending||this.pendingSubmission)return;
+     this.closeShift={...this.drawer.active};this.countedCash='';this.drawerError='';
+   },
+   submitDrawer(kind){
+     if(this.cashPending||this.pendingSubmission)return;
+     const session=this.drawer?.active?.id;
+     let path='/api/pos/cash-drawer/open', body={request_id:crypto.randomUUID()};
+     if(kind==='open'){
+       body.opening_minor=parseCash(this.openingCash);
+       if(body.opening_minor===null)return;
+     }else if(kind==='move'){
+       if(!session)return;
+       path='/api/pos/cash-drawer/'+session+'/movements';
+       Object.assign(body,{kind:this.drawerMove.kind,amount_minor:parseCash(this.drawerMove.amount),reason:this.drawerMove.reason.trim()});
+       if(!body.amount_minor||!body.reason)return;
+     }else{
+       if(!this.closeShift)return;
+       path='/api/pos/cash-drawer/'+this.closeShift.id+'/close';
+       Object.assign(body,{counted_minor:parseCash(this.countedCash),revision:this.closeShift.revision});
+       if(body.counted_minor===null)return;
+     }
+     this.drawerError='';
+     return this.startCashAction({kind,path,body});
+   },
+   async openReturn(orderId){
+     this.closeActionDialog(true);
+     const sequence=++this.returnRequest;
+     this.returnOrderId=orderId;this.returnRows=[];this.returnHistory=null;
+     this.returnReason='';this.returnError='';this.returnQuote=null;this.returnDrawer=null;this.returnBusy=true;
+     await this.$nextTick();
+     if(sequence!==this.returnRequest)return;
+     const dialog=document.getElementById('return-dialog');
+     if(dialog&&!dialog.open)dialog.showModal();
+     try{
+       const [options, history, status]=await Promise.all([
+         posRequest('/api/pos/orders/'+orderId+'/return-options'),
+         posRequest('/api/pos/orders/'+orderId+'/refunds'),
+         posRequest('/api/pos/cash-drawer'),
+       ]);
+       if(sequence!==this.returnRequest)return;
+       this.returnRows=options.lines.map(row=>({...row,quantity:'',restock:false}));
+       this.returnHistory=history;this.returnDrawer=status;
+     }catch(err){if(sequence===this.returnRequest&&!(await this.expireSession(err)))this.returnError=err.message;}
+     finally{if(sequence===this.returnRequest)this.returnBusy=false;}
+   },
+   async refundHistoryPage(page){
+     const sequence=this.returnRequest;
+     try{
+       const result=await posRequest('/api/pos/orders/'+this.returnOrderId+'/refunds?page='+page);
+       if(sequence===this.returnRequest)this.returnHistory=result;
+     }catch(err){if(sequence===this.returnRequest&&!(await this.expireSession(err)))this.returnError=err.message;}
+   },
+   fillReturn(){
+     this.returnQuote=null;
+     for(const row of this.returnRows)row.quantity=row.remaining_milli?String(row.remaining_milli/1000):'';
+   },
+   async previewReturn(){
+     if(this.cashPending||this.pendingSubmission||this.returnBusy)return;
+     this.returnQuote=null;this.returnError='';
+     const lines=[];
+     for(const row of this.returnRows){
+       const raw=String(row.quantity).trim();
+       if(!raw)continue;
+       const qty=/^\d+(?:\.\d{1,3})?$/.test(raw)?Math.round(Number(raw)*1000):NaN;
+       if(qty===0)continue;
+       if(!Number.isSafeInteger(qty)||qty>row.remaining_milli||qty%row.step_milli!==0){
+         this.returnError='Check the quantity for '+row.name+'.';return;
+       }
+       lines.push({line:row.line,qty_milli:qty,restock:row.restock});
+     }
+     if(!lines.length||!this.returnReason.trim()){this.returnError='Enter a return quantity and reason.';return;}
+     const sequence=this.returnRequest;
+     this.returnBusy=true;
+     try{
+       const quote=await posRequest('/api/pos/orders/'+this.returnOrderId+'/refund-preview',{method:'POST',csrf:this.csrf,body:{lines}});
+       if(sequence===this.returnRequest)this.returnQuote={...quote,submissionLines:lines,reason:this.returnReason.trim()};
+     }catch(err){if(sequence===this.returnRequest&&!(await this.expireSession(err)))this.returnError=err.message;}
+     finally{if(sequence===this.returnRequest)this.returnBusy=false;}
+   },
+   confirmReturn(){
+     if(!this.returnQuote||this.cashPending||this.pendingSubmission||!this.returnDrawer||
+        (this.returnDrawer.tracking_enabled&&!this.returnDrawer.active))return;
+     const quote=this.returnQuote;
+     return this.startCashAction({kind:'refund',path:'/api/pos/orders/'+this.returnOrderId+'/refunds',
+       orderId:this.returnOrderId,total:quote.total_minor,body:{request_id:crypto.randomUUID(),quote:quote.quote,
+         reason:quote.reason,lines:quote.submissionLines,cash_session_id:this.returnDrawer.active?.id??null}});
+   },
+   startCashAction(attempt){
+     if(!this.user||this.cashPending||this.pendingSubmission)return;
+     try{sessionStorage.setItem(cashStorageKey+this.user.email,JSON.stringify(attempt));}
+     catch{this.cashNotice='This browser cannot save a retry reference. The cash action was not submitted.';this.returnError=this.drawerError=this.cashNotice;return;}
+     this.cashPending=attempt;
+     return this.retryCashAction();
+   },
+   async retryCashAction(){
+     const attempt=this.cashPending, actor=this.user?.email;
+     if(!attempt||!actor||this.cashSubmitting)return;
+     this.cashSubmitting=true;this.cashNotice='';
+     try{
+       const result=await posRequest(attempt.path,{method:'POST',csrf:this.csrf,body:attempt.body});
+       if(!result?.id||(attempt.kind==='refund'&&(!Array.isArray(result.lines)||result.order_id!==attempt.orderId))||
+          (attempt.kind==='close'&&!result.closed_at))throw new Error('The server did not confirm the original cash action.');
+       if(this.user?.email!==actor)return;
+       this.clearCashAction(actor);
+       if(attempt.kind==='refund'){
+         document.getElementById('return-dialog')?.close();
+         this.cashNotice='Refund '+this.refundRef(result.id)+' recorded. Check whether cash was already handed over before paying again.';
+         this.openRefundReceipt(result);
+         if(this.page==='reports')void this.loadListing();
+       }else{
+         this.viewedShift=attempt.kind==='close'?result:null;
+         this.closeShift=null;this.openingCash='';this.countedCash='';this.drawerMove={kind:'in',amount:'',reason:''};
+         this.cashNotice=attempt.kind==='open'?'Drawer shift '+this.orderRef(result.id)+' confirmed.':
+           attempt.kind==='close'?'Shift '+this.orderRef(result.id)+' closed. Variance: '+this.reportMoney(result.variance_minor)+'.':
+           'Cash movement '+this.orderRef(result.id)+' recorded.';
+         if(this.page==='drawer')await this.loadDrawer(1,attempt.kind==='close'?result.id:null);
+       }
+     }catch(err){
+       if(await this.expireSession(err))return;
+       if([400,403,404,409,422].includes(err.status)){
+         this.clearCashAction(actor);
+         if(attempt.kind==='refund'){this.returnQuote=null;this.returnError=err.message;}
+         else if(this.page==='drawer'){
+           this.closeShift=null;this.countedCash='';
+           await this.loadDrawer();this.drawerError=err.message;
+         }
+         this.cashNotice=err.message;
+       }else{
+         this.cashNotice='Not confirmed. Retry the original action before recording it again or handing out cash.';
+         this.returnError=this.cashNotice;
+       }
+     }finally{this.cashSubmitting=false;}
+   },
+   clearCashAction(actor){
+     try{sessionStorage.removeItem(cashStorageKey+actor);}catch{}
+     this.cashPending=null;
+   },
+   refundRef(id){return 'RF-'+String(id).padStart(3,'0');},
+   async showRefund(id){
+     const actor=this.user?.email;
+     try{const refund=await posRequest('/api/pos/refunds/'+id);if(this.user?.email===actor)this.openRefundReceipt(refund);}
+     catch(err){if(!(await this.expireSession(err))){this.returnError=err.message;this.ordersError=err.message;}}
+   },
+   openRefundReceipt(refund){
+     this.receiptOrder={refund};
+     this.$nextTick(()=>{const d=document.getElementById('receipt-dialog');if(d&&!d.open)d.showModal();});
+   },
+   setReportKind(kind){
+     if(this.reportKind===kind)return;
+     this.reportKind=kind;
+     return this.loadListing(1);
+   },
    async loadProductOptions(){
      const request=++this.optionsRequest;
      this.optionsState='loading';
@@ -476,7 +688,7 @@ const app = Vue.createApp({
      const edit=this.editingOrder;
      const body={
        ...(edit?{revision:edit.revision,[finalize?'checkout_id':'update_id']:crypto.randomUUID()}:{request_id:this.orderRequestId??=crypto.randomUUID()}),
-       ...(finalize?{payment_method:'cash',cash_received_minor:this.cashMinor}:{}),
+       ...(finalize?{payment_method:'cash',cash_received_minor:this.cashMinor,cash_session_id:this.paymentDrawer.active?.id??null}:{}),
        customer:this.customer||null,note:this.note||null,
        lines:this.lines.map(l=>({sku:l.id,qty:l.qty,price_minor:l.price,discount:l.discount})),
      };
@@ -795,7 +1007,7 @@ const app = Vue.createApp({
      else if(this.mode==='% Disc'){l.discount=Math.min(100,n);}
      else {l.price=Math.round(Math.min(999999,n)*100);}
    },
-   openDialog(name){this.orderSaveError='';if(['payment','update'].includes(name))this.cashReceived='';this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
+   openDialog(name){this.orderSaveError='';if(['payment','update'].includes(name)){this.cashReceived='';void this.loadPaymentDrawer();}this.menu=false;this.dialogName=name;this.draftNote=this.note;this.$nextTick(()=>{const d=document.getElementById('dialog');if(d&&!d.open)d.showModal();});},
    closeDialog(){if(this.orderSaving)return;document.getElementById('dialog')?.close();},
    closeOutsideHeader(event){
      if(this.menu&&!event.target.closest?.('[data-header-popover="menu"]'))this.menu=false;
@@ -942,7 +1154,7 @@ const app = Vue.createApp({
        e.preventDefault();
        return;
      }
-     if(!this.user||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||this.receiptOrder||this.pendingSubmission||e.target?.isContentEditable)return;
+     if(!this.user||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.isComposing||this.dialogName||this.actionDialog||this.receiptOrder||this.returnOrderId||this.pendingSubmission||e.target?.isContentEditable)return;
      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
        if(this.navigateTopBar(e))return;
        if(this.page==='register'&&!this.viewedOrder&&(e.target?.id==='search'||!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)))this.navigateRegister(e);

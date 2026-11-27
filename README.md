@@ -36,4 +36,12 @@ Management and Orders tables load one server page at a time. Search filters the 
 
 ## Daily Sales Report
 
-Open **Reports** in the top bar. Choose Today, Yesterday or a custom date range (Pakistan time), optionally select a cashier, and apply the filters. Summary and payment totals cover all matching finalized orders even when the details are paginated. Drafts are excluded. Use the order or receipt icon to review or print a sale. Historical non-cash payment methods remain visible. Refunds and net sales after refunds are not available until returns are implemented; sales after discounts are not drawer cash or profit.
+Open **Reports** in the top bar. Choose Today, Yesterday or a custom date range (Pakistan time), optionally select a cashier, and apply the filters. Summary and payment totals cover all matching finalized orders even when the details are paginated. Drafts are excluded. Use the order or receipt icon to review or print a sale. Historical non-cash payment methods remain visible. The summary also shows cash refunds and net sales after refunds. Switch to **Refunds** for a paginated list and printable receipt. A refund belongs to its posting date and posting cashier. Net sales are not drawer cash or profit.
+
+
+## Returns and cash drawer
+
+1. Pull both repositories and run `php artisan migrate` in Laravel before running the updated frontend.
+2. In **Orders**, choose the Returns icon on a finalized cash sale. Enter the returned quantities and reason. Choose **Restock** only for resellable eligible items. **Review refund** shows what the server will record before you confirm. Refund receipts can be reprinted from the order's refund history or Reports.
+3. Open **Cash drawer** from the top bar and enter the counted opening cash. Tracking begins with that first shift. Use **Cash in/out** only for manual movements outside sales or refunds. Select **Start closing count**, enter actual cash, and confirm. The saved close shows the shortage, overage or match. Open a new shift before the next checkout or cash refund once tracking has started.
+4. If a cash write is not confirmed, leave the tab open and click **Retry original cash action**. The retry reference is saved in the same tab. Confirm if cash was physically handed over before paying again. Staff permissions are unchanged.
