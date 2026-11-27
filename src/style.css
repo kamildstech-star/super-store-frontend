@@ -306,3 +306,26 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .customer-picker-actions{flex-wrap:wrap}
 .receipt-facts .receipt-date{grid-template-columns:minmax(0,1fr) max-content}
 .receipt-date dd{white-space:nowrap;overflow-wrap:normal;font-variant-numeric:tabular-nums}
+
+/* Store settings and receipt identity */
+.auth-pos-wordmark{letter-spacing:-.06em}
+.top-store-name{max-width:clamp(100px,15vw,240px);padding-inline:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--plum-dark);font-size:14px}
+.store-settings-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(250px,1fr);gap:16px;align-items:start}
+.settings-card{min-width:0;border:1px solid var(--border);border-radius:12px;background:white;padding:18px}
+.settings-card h2{font-size:17px;font-weight:750;margin:0 0 6px}
+.settings-card>.report-caption{margin:0 0 14px}
+.settings-fields{border:0;padding:0;margin:0;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.settings-full{grid-column:1/-1}
+.settings-fields textarea{resize:vertical}
+.settings-actions{justify-content:flex-end;flex-wrap:wrap;margin:14px 0}
+.settings-fixed{display:flex;flex-wrap:wrap;gap:12px 30px;border-top:1px solid var(--border);padding-top:12px;margin:0 0 8px}
+.settings-fixed dt{font-size:12px;color:var(--muted)}
+.settings-fixed dd{margin:3px 0 0;font-weight:700}
+.settings-receipt-paper{max-width:320px;margin:0 auto;border:1px dashed #d9d1d8;background:#fcfafc}
+.settings-receipt-paper h3{font-size:19px;font-weight:750;margin:0;line-height:1.2}
+.receipt-store-address,.receipt-store-footer{white-space:pre-line;overflow-wrap:anywhere}
+.receipt-heading .receipt-document-label{margin-top:8px}
+.receipt-store-footer{text-align:center;border-top:1px dashed #c5bbc4;padding-top:8px;margin:12px 0 0;break-inside:avoid}
+@media(max-width:970px){.top-store-name{display:none}}
+@media(max-width:740px){.store-settings-layout{grid-template-columns:1fr}}
+@media(max-width:450px){.settings-fields{grid-template-columns:1fr}.settings-card{padding:14px}}

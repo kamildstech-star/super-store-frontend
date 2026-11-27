@@ -67,3 +67,7 @@ Run the Laravel migration before using the updated frontend. The register shows 
 Use **Customers** in the top bar to create, view, edit, archive, and search customer records. From the register, open **Customer** to search the saved directory by name, phone, or email, or use **Add new customer** to save and select one without leaving the sale. Choose **No customer** to clear the selection. A sale never requires a customer.
 
 The sales receipt keeps a blank Customer value for an unassigned sale, omits Cashier, and displays a compact date and time on one line in Pakistan time. Existing orders keep their saved names. This release requires the matching backend migration.
+
+## Store Settings
+
+Open the **Settings** gear in the top bar. Set the store name and optionally the address, phone, and a receipt footer. The live preview does not change saved settings until you select **Save settings**. New sales and refund receipts use the saved details; old receipts keep their original store identity. Currency (PKR) and timezone (Asia/Karachi) are read-only. Use the matching backend migration before starting the frontend.

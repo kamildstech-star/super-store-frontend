@@ -14,8 +14,8 @@
 <div id="app" v-cloak>
 <main v-if="!user" class="auth-screen">
   <section class="auth-card" aria-labelledby="auth-title">
-    <span class="wordmark">odoo</span>
-    <div><span class="eyebrow">SUPER STORE · POINT OF SALE</span><h1 id="auth-title">Sign in</h1></div>
+    <span class="wordmark auth-pos-wordmark">POS</span>
+    <div><span class="eyebrow">POINT OF SALE</span><h1 id="auth-title">Sign in</h1></div>
     <p v-if="authState==='loading'" role="status">Checking your session…</p>
     <p v-if="authError" class="mg-error" role="alert">{{authError}}</p>
     <button v-if="authState==='unavailable'" type="button" class="primary" @click="restoreSession">Retry connection</button>
@@ -27,6 +27,7 @@
   </section>
 </main>
 <header v-if="user" :inert="Boolean(pendingSubmission)" class="topbar" data-register-keys="topbar">
+  <strong class="top-store-name" :title="storeProfile.name">{{storeProfile.name}}</strong>
   <nav class="top-pages" aria-label="POS pages">
     <button v-for="item in pages" :key="item.id" data-key-target class="pos-nav-button" type="button"
       :title="item.label" :aria-label="item.label" :aria-current="page===item.id?'page':undefined"
@@ -48,7 +49,7 @@
     <div class="menu-wrap" data-header-popover="profile">
       <button data-key-target class="avatar profile-toggle" type="button" aria-controls="profile-dropdown" aria-label="Profile" title="Profile" :aria-expanded="profile" @click="profile=!profile; menu=false"><pos-icon name="user"></pos-icon></button>
       <div id="profile-dropdown" v-show="profile" class="menu-panel pos-dropdown profile-menu" role="group" aria-label="Signed-in profile">
-        <span class="pos-dropdown-label">Signed in as</span>
+        <span class="pos-dropdown-label">{{storeProfile.name}}</span>
         <span class="profile-details"><strong>{{user.name}}</strong><small>{{user.email}}</small></span>
       </div>
     </div>
@@ -68,6 +69,63 @@
   <button type="button" class="secondary" :disabled="managementBusy" @click="submitPurchase">{{managementBusy?'Checking…':'Retry original receipt'}}</button>
 </section>
 <p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && cartStorageError" class="cart-recovery" role="status">This browser could not save the working cart. Park it to keep a server copy.</p>
+
+<main v-if="user && page==='settings'" class="management-page store-settings">
+  <div class="mg-page-head">
+    <div><span class="eyebrow">POINT OF SALE / SETUP</span><h1>Store Settings</h1></div>
+  </div>
+  <p v-if="settingsBusy" role="status" class="report-caption">Loading saved settings…</p>
+  <div v-else-if="settingsError" class="mg-error" role="alert">
+    Settings could not be loaded. <button class="secondary" type="button" @click="loadStoreSettings(true)">Retry</button>
+  </div>
+  <div v-else-if="settingsForm" class="store-settings-layout">
+    <form class="settings-card" @submit.prevent="saveStoreSettings">
+      <h2>Store details</h2>
+      <p class="report-caption">These details appear on new sales and refund receipts. Old receipts stay unchanged.</p>
+      <fieldset class="settings-fields" :disabled="managementBusy || settingsConflict">
+        <label class="mg-field">Store name
+          <input v-model="settingsForm.name" maxlength="80" required name="store-name" autocomplete="organization">
+        </label>
+        <label class="mg-field">Store phone (optional)
+          <input v-model="settingsForm.phone" type="tel" maxlength="40" name="store-phone" autocomplete="tel">
+        </label>
+        <label class="mg-field settings-full">Store address (optional)
+          <textarea v-model="settingsForm.address" maxlength="240" rows="3" name="store-address" autocomplete="street-address"></textarea>
+        </label>
+        <label class="mg-field settings-full">Receipt footer (optional)
+          <textarea v-model="settingsForm.receipt_footer" maxlength="180" rows="2" placeholder="e.g. Thank you for shopping with us!" name="receipt-footer"></textarea>
+        </label>
+      </fieldset>
+      <p v-if="settingsConflict" class="mg-error" role="alert">
+        Settings were changed in another session. Load the saved settings to continue.
+        <button class="secondary" type="button" @click="loadStoreSettings(true)">Load saved settings</button>
+      </p>
+      <div class="mg-actions settings-actions">
+        <button type="button" class="secondary" :disabled="managementBusy || settingsConflict || !settingsDirty" @click="settingsForm={...storeProfile}">Discard changes</button>
+        <button type="submit" class="primary" :disabled="managementBusy || settingsConflict || !settingsDirty || !settingsValues.name">{{managementBusy?'Saving…':'Save settings'}}</button>
+      </div>
+      <dl class="settings-fixed">
+        <div><dt>Currency</dt><dd>{{storeProfile.currency}}</dd></div>
+        <div><dt>Timezone</dt><dd>{{storeProfile.timezone}}</dd></div>
+      </dl>
+      <p class="report-caption">Currency and timezone are fixed to keep prices, daily order numbers and reports consistent.</p>
+    </form>
+    <section class="settings-card settings-preview" aria-labelledby="settings-preview-title">
+      <h2 id="settings-preview-title">Receipt preview</h2>
+      <p class="report-caption">Preview only. Save to apply the new details.</p>
+      <article class="receipt-paper settings-receipt-paper">
+        <header class="receipt-heading">
+          <h3>{{settingsValues.name || 'Store name'}}</h3>
+          <p v-if="settingsValues.address" class="receipt-store-address">{{settingsValues.address}}</p>
+          <p v-if="settingsValues.phone">Tel: {{settingsValues.phone}}</p>
+          <p class="receipt-document-label">Sample sales receipt</p>
+        </header>
+        <dl class="receipt-facts receipt-totals"><div><dt>Sample total</dt><dd>Rs. 250.00</dd></div></dl>
+        <p v-if="settingsValues.receipt_footer" class="receipt-store-footer">{{settingsValues.receipt_footer}}</p>
+      </article>
+    </section>
+  </div>
+</main>
 
 <main v-if="user && page==='orders'" class="management-page orders-page">
   <div class="mg-page-head">
@@ -888,7 +946,12 @@
 <dialog id="receipt-dialog" class="receipt-dialog" aria-labelledby="receipt-heading" @close="receiptOrder=null">
   <template v-if="receiptOrder">
     <article v-if="receiptOrder.refund" class="receipt-paper">
-      <header class="receipt-heading"><h2 id="receipt-heading">Super Store</h2><p>Refund receipt {{refundRef(receiptOrder.refund.id)}}</p></header>
+      <header class="receipt-heading">
+        <h2 id="receipt-heading">{{receiptBrand.name}}</h2>
+        <p v-if="receiptBrand.address" class="receipt-store-address">{{receiptBrand.address}}</p>
+        <p v-if="receiptBrand.phone">Tel: {{receiptBrand.phone}}</p>
+        <p class="receipt-document-label">Refund receipt {{refundRef(receiptOrder.refund.id)}}</p>
+      </header>
       <dl class="receipt-facts">
         <div><dt>Original sale</dt><dd>{{receiptOrder.refund.order_reference ?? recordRef(receiptOrder.refund.order_id)}}</dd></div>
         <div v-if="receiptOrder.refund.order_business_date"><dt>Order day</dt><dd>{{receiptOrder.refund.order_business_date}}</dd></div>
@@ -903,11 +966,14 @@
         </tr></tbody>
       </table>
       <dl class="receipt-facts receipt-totals"><div><dt><strong>Cash refund</strong></dt><dd><strong>{{reportMoney(receiptOrder.refund.total_minor)}}</strong></dd></div></dl>
+      <p v-if="receiptBrand.receipt_footer" class="receipt-store-footer">{{receiptBrand.receipt_footer}}</p>
     </article>
     <article v-else class="receipt-paper">
       <header class="receipt-heading">
-        <h2 id="receipt-heading">Super Store</h2>
-        <p>Sales receipt {{orderRef(receiptOrder)}}</p>
+        <h2 id="receipt-heading">{{receiptBrand.name}}</h2>
+        <p v-if="receiptBrand.address" class="receipt-store-address">{{receiptBrand.address}}</p>
+        <p v-if="receiptBrand.phone">Tel: {{receiptBrand.phone}}</p>
+        <p class="receipt-document-label">Sales receipt {{orderRef(receiptOrder)}}</p>
       </header>
       <dl class="receipt-facts">
         <div v-if="receiptOrder.business_date"><dt>Order day</dt><dd>{{receiptOrder.business_date}}</dd></div>
@@ -930,6 +996,7 @@
         </template>
       </dl>
       <p v-if="receiptOrder.payment_method==='cash' && receiptOrder.cash_received_minor==null" class="receipt-legacy">Original cash received and change were not recorded.</p>
+      <p v-if="receiptBrand.receipt_footer" class="receipt-store-footer">{{receiptBrand.receipt_footer}}</p>
     </article>
     <p v-if="receiptOrder.payoutReminder" class="receipt-payout">Check whether cash was already handed over before paying this refund.</p>
     <footer class="receipt-actions">

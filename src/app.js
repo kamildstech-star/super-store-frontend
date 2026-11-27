@@ -91,6 +91,11 @@ const decimalMinor=(value,places)=>{
  const amount=Number(match[1])*scale+Number((match[2]??'').padEnd(places,'0'));
  return Number.isSafeInteger(amount)?amount:null;
 };
+const defaultStore=()=>({name:'Super Store',address:null,phone:null,receipt_footer:null});
+const storeFormValues=form=>({
+ name:form.name.trim(),address:form.address?.trim()||null,phone:form.phone?.trim()||null,
+ receipt_footer:form.receipt_footer?.trim()||null,
+});
 const emptyManagement=()=>({categories:[],units:[],suppliers:[]});
 const emptyReportFilters=()=>({period:'today',from:'',to:'',cashier:''});
 const reportInteger=new Intl.NumberFormat('en-PK',{maximumFractionDigits:0});
@@ -123,7 +128,7 @@ async function posRequest(path,{method='GET',body,csrf}={}) {
 }
 
 const pages = [{id:'register',label:'Register'}, {id:'orders',label:'Orders'}, {id:'inventory',label:'Inventory',icon:'archive'}, {id:'purchases',label:'Purchases',icon:'basket'},
-  {id:'reports',label:'Reports',icon:'grid'}, {id:'drawer',label:'Cash drawer',icon:'cash'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title,icon:item.icon}))];
+  {id:'reports',label:'Reports',icon:'grid'}, {id:'drawer',label:'Cash drawer',icon:'cash'}, ...Object.entries(manager).map(([id,item])=>({id,label:item.title,icon:item.icon})), {id:'settings',label:'Settings',icon:'settings'}];
 const maxCashMinor=9000000000000000;
 const cashStorageKey='super-store.pos.cash.v1:';
 const parseCash=value=>{
@@ -144,6 +149,7 @@ const PosRegister = Vue.defineComponent({
  setup: usePosNotifications,
  data:()=>({page:'register',manager,pages,profile:false,managementData:emptyManagement(),
    managementBusy:false,managementError:'',managementForm:null,managementDelete:null,productImageFile:null,productImagePreview:'',productImageRemove:false,productImageError:'',optionsState:'idle',optionsRequest:0,listRows:[],listMeta:emptyPage(),listQuery:'',listSize:15,listBusy:false,listError:'',listTimer:null,listRequest:0,actionDialog:'',managementView:null,previewedOrder:null,previewOrderId:null,previewError:'',
+   storeProfile:defaultStore(),settingsForm:null,settingsBusy:false,settingsError:false,settingsConflict:false,settingsRequest:0,
    user:null,authState:'loading',authBusy:false,authError:'',csrf:'',loginForm:{email:'',password:''},
    reportForm:emptyReportFilters(),reportApplied:emptyReportFilters(),report:null,reportKind:'sales',reportPinned:null,
    paymentDrawer:null,paymentDrawerRequest:0,paymentDrawerError:'',
@@ -176,6 +182,9 @@ const PosRegister = Vue.defineComponent({
    movementMinor(){return parseCash(this.drawerMove.amount);},
    countedMinor(){return parseCash(this.countedCash);},
    canFinalize(){return !this.cashPending&&this.paymentDrawer!==null&&(!this.paymentDrawer.tracking_enabled||Boolean(this.paymentDrawer.active))&&this.cashMinor!==null&&this.cashMinor>=this.total;},
+   settingsValues(){return this.settingsForm?storeFormValues(this.settingsForm):null;},
+   settingsDirty(){return this.settingsValues&&Object.keys(this.settingsValues).some(key=>this.settingsValues[key]!==this.storeProfile[key]);},
+   receiptBrand(){return (this.receiptOrder?.refund??this.receiptOrder)?.receipt_store??defaultStore();},
    purchaseLookup(){return new Map(this.purchaseOptions.map(product=>[String(product.id),product]));},
    purchaseRankedOptions(){
      const supplier=String(this.purchaseForm?.supplier_id);
@@ -216,7 +225,10 @@ const PosRegister = Vue.defineComponent({
    saleOrderRef(){const order=this.viewedOrder??this.editingOrder;return order?this.orderRef(order):null;},
    displayedTotal(){return this.viewedOrder?.total_minor ?? this.total;}
  },
- watch:{workingCart(snapshot){if(snapshot!==null)this.persistCart(snapshot);}},
+ watch:{
+   workingCart(snapshot){if(snapshot!==null)this.persistCart(snapshot);},
+   'storeProfile.name'(name){document.title=this.user?name+' · Point of Sale':'Point of Sale · Register';},
+ },
  mounted(){
    void this.restoreSession();
    window.addEventListener('keydown',this.keyboard);
@@ -280,7 +292,7 @@ const PosRegister = Vue.defineComponent({
        this.readCashRecovery();
        this.readPurchaseRecovery();
        this.authState=this.user?'ready':'guest';
-       if(this.user)await this.loadCatalog();
+       if(this.user)await Promise.all([this.loadCatalog(),this.loadStoreSettings()]);
      }catch(err){this.authState='unavailable';this.authError=err.message;}
    },
    async login(){
@@ -292,7 +304,7 @@ const PosRegister = Vue.defineComponent({
        this.readCashRecovery();
        this.readPurchaseRecovery();
        this.loginForm={email:'',password:''};
-       await this.loadCatalog();
+       await Promise.all([this.loadCatalog(),this.loadStoreSettings()]);
      }catch(err){
        this.loginForm.password='';
        this.authError=err.message;
@@ -318,6 +330,8 @@ const PosRegister = Vue.defineComponent({
      this.returnRequest++;this.drawerRequest++;this.paymentDrawerRequest++;this.cashPending=null;this.cashNotice='';
      this.drawer=null;this.viewedShift=null;this.drawerHistory=null;this.drawerMovements=null;this.closeShift=null;this.returnQuote=null;this.returnRows=[];
      this.cartReady=false;this.cartScope=null;this.purchasePending=null;
+     this.settingsRequest++;this.storeProfile=defaultStore();this.settingsForm=null;
+     this.settingsBusy=false;this.settingsError=false;this.settingsConflict=false;document.title='Point of Sale · Register';
      this.user=null;this.authState='guest';this.profile=false;this.menu=false;
      this.page='register';this.managementData=emptyManagement();this.managementForm=null;this.managementDelete=null;
      this.authError='';this.catalog=[];this.categories=[allProducts];this.category='all';this.query='';
@@ -340,8 +354,39 @@ const PosRegister = Vue.defineComponent({
      this.managementForm=null;this.managementDelete=null;this.managementError='';
      this.resetListing();
      if(page==='register'){await this.loadCatalog();return;}
+     if(page==='settings'){await this.loadStoreSettings(true);return;}
      if(page==='drawer'){this.closeShift=null;this.viewedShift=null;await this.loadDrawer();return;}
      await Promise.all([this.loadListing(1), ...(['products','purchases'].includes(page)?[this.loadProductOptions()]:[]), ...(page==='purchases'?[this.loadPurchaseOptions()]:[])]);
+   },
+   async loadStoreSettings(forEdit=false){
+     const request=++this.settingsRequest;
+     if(forEdit){this.settingsBusy=true;this.settingsError=false;this.settingsConflict=false;}
+     try{
+       const data=await posRequest('/api/pos/settings');
+       if(request!==this.settingsRequest)return;
+       this.storeProfile=data;document.title=data.name+' · Point of Sale';
+       if(forEdit&&this.page==='settings')this.settingsForm={...data};
+     }catch(err){
+       if(request!==this.settingsRequest||await this.expireSession(err))return;
+       if(forEdit){
+         this.settingsError=true;
+         this.notify('error',err.message,'Could not load store settings');
+       }
+     }finally{if(forEdit&&request===this.settingsRequest)this.settingsBusy=false;}
+   },
+   async saveStoreSettings(){
+     if(this.managementBusy||this.settingsBusy||this.settingsError||this.settingsConflict||!this.settingsDirty)return;
+     this.managementBusy=true;
+     try{
+       const data=await posRequest('/api/pos/settings',{method:'PUT',csrf:this.csrf,
+         body:{...this.settingsValues,revision:this.settingsForm.revision}});
+       this.storeProfile=data;this.settingsForm={...data};
+       this.notify('success','New receipts will use the saved details.','Store settings saved');
+     }catch(err){
+       if(await this.expireSession(err))return;
+       if(err.status===409)this.settingsConflict=true;
+       this.notify('error',err.message,'Could not save store settings');
+     }finally{this.managementBusy=false;}
    },
    resetListing(){
      clearTimeout(this.listTimer);this.listRequest++;this.optionsRequest++;
