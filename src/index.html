@@ -71,9 +71,9 @@
   <p role="status">{{cashNotice || 'Confirm the original cash action before making another cash entry.'}}</p>
   <button type="button" class="secondary" :disabled="cashSubmitting" @click="retryCashAction">{{cashSubmitting?'Checking…':'Retry original cash action'}}</button>
 </section>
-<section v-if="user && purchasePending" class="submission-banner" aria-label="Pending purchase receipt">
-  <p role="status">Stock receipt not confirmed. Retry the original submission instead of entering it again.</p>
-  <button type="button" class="secondary" :disabled="managementBusy" @click="submitPurchase">{{managementBusy?'Checking…':'Retry original receipt'}}</button>
+<section v-if="user && purchasePending" class="submission-banner" aria-label="Pending supplier entry">
+  <p role="status">Posting not confirmed. Retry the original entry. If cash already changed hands, do not pay again.</p>
+  <button type="button" class="secondary" :disabled="managementBusy" @click="submitPurchase">{{managementBusy?'Checking…':supplierRetryLabel}}</button>
 </section>
 <p v-if="user && page==='register' && !pendingSubmission && !viewedOrder && !editingOrder && cartStorageError" class="cart-recovery" role="status">This browser could not save the working cart. Park it to keep a server copy.</p>
 
@@ -383,13 +383,15 @@
       <button class="secondary" type="button" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
     </div>
     <div class="mg-table-wrap"><table class="mg-table">
-      <thead><tr><th scope="col">Receipt</th><th scope="col">Posted (PKT)</th><th scope="col">Supplier</th><th scope="col">Invoice / reference</th><th scope="col">Products</th><th scope="col">Cost (PKR)</th><th scope="col">Recorded by</th></tr></thead>
+      <thead><tr><th scope="col">Receipt</th><th scope="col">Posted (PKT)</th><th scope="col">Supplier</th><th scope="col">Invoice / reference</th><th scope="col">Products</th><th scope="col">Total (PKR)</th><th scope="col">Paid</th><th scope="col">Balance</th><th scope="col">Payment status</th><th scope="col">Recorded by</th></tr></thead>
       <tbody>
         <tr v-for="row in listBusy?[]:listRows" :key="row.id">
           <td><button type="button" class="order-ref-link" @click="showPurchase(row.id)">{{purchaseRef(row.id)}}</button></td>
-          <td>{{receiptDate(row.created_at)}}</td><td>{{row.supplier_name}}</td><td>{{row.invoice_reference||'—'}}</td><td>{{row.line_count}}</td><td>{{reportMoney(row.total_minor)}}</td><td>{{row.actor}}</td>
+          <td>{{receiptDate(row.created_at)}}</td><td>{{row.supplier_name}}</td><td>{{row.invoice_reference||'—'}}</td><td>{{row.line_count}}</td><td>{{reportMoney(row.total_minor)}}</td>
+          <td>{{row.payment_tracking?reportMoney(row.paid_minor):'—'}}</td><td>{{row.payment_tracking?reportMoney(row.balance_minor):'—'}}</td>
+          <td><span class="supplier-payment-badge" :data-payment-status="row.payment_status">{{paymentStatusLabel(row.payment_status)}}</span></td><td>{{row.actor}}</td>
         </tr>
-        <tr v-if="listBusy || !listRows.length"><td colspan="7">{{listBusy?'Loading receipts…':listError?'Could not load purchase receipts.':'No matching purchase receipts.'}} <button v-if="listError&&!listBusy" class="order-ref-link" type="button" @click="loadListing(1)">Retry listing</button></td></tr>
+        <tr v-if="listBusy || !listRows.length"><td colspan="10">{{listBusy?'Loading receipts…':listError?'Could not load purchase receipts.':'No matching purchase receipts.'}} <button v-if="listError&&!listBusy" class="order-ref-link" type="button" @click="loadListing(1)">Retry listing</button></td></tr>
       </tbody>
     </table></div>
     <pos-table-pagination v-if="!listError" :meta="listMeta" :size="listSize" :busy="listBusy" @page="loadListing" @size="listingSize"></pos-table-pagination>
@@ -444,6 +446,7 @@
   </div>
   <div v-if="page==='products' && optionsState==='error'" class="mg-error" role="alert">Could not load product form options. <button type="button" @click="loadProductOptions">Retry</button></div>
   <section class="mg-list" aria-label="Management records" :aria-busy="listBusy">
+    <p v-if="page==='suppliers'" class="report-caption">Balances include only purchases with payment tracking. Use the cash icon for a supplier’s payment history.</p>
     <div class="mg-list-tools inventory-tools">
       <input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" :aria-label="'Search '+manage.title" :placeholder="'Search '+manage.title.toLowerCase()+'…'">
       <label v-if="page==='products'">Preferred supplier
@@ -467,6 +470,8 @@
             <td v-for="(value,index) in rowValues(row)" :key="index">{{value}}</td>
             <td class="mg-row-tools">
               <button type="button" class="secondary action-icon" @click="managementShow(row)" :disabled="managementBusy || !productOptionsReady" :aria-label="'View '+row.name" :title="'View '+row.name"><pos-icon name="view"></pos-icon></button>
+              <button v-if="page==='suppliers'" type="button" class="secondary action-icon" @click="openSupplierLedger(row)"
+                :aria-label="'Payments for '+row.name" title="Supplier payments"><pos-icon name="cash"></pos-icon></button>
               <button class="secondary action-icon" @click="managementStart(row)" :disabled="managementBusy || !productOptionsReady" :aria-label="'Edit '+row.name" :title="'Edit '+row.name"><pos-icon name="edit"></pos-icon></button>
               <button v-if="page!=='products'||row.is_active" class="action-icon icon-delete" type="button" :disabled="managementBusy"
                @click="managementConfirm(row)"
@@ -593,13 +598,13 @@
   <button :class="{active:mobile==='order'}" @click="mobile='order'"><pos-icon name="basket"></pos-icon> Order · {{ money(total) }}</button>
 </nav>
 
-<dialog id="action-dialog" class="pos-modal" :class="{ 'pos-modal-wide':['order','form','stock','stock-history','purchase-form','purchase-detail'].includes(actionDialog) }" aria-labelledby="action-title" @cancel.prevent="closeActionDialog()">
+<dialog id="action-dialog" class="pos-modal" :class="{ 'pos-modal-wide':['order','form','stock','stock-history','purchase-form','purchase-detail','supplier-ledger'].includes(actionDialog) }" aria-labelledby="action-title" @cancel.prevent="closeActionDialog()">
   <div v-if="actionDialog" class="pos-modal-shell">
     <div id="picker-overlays"></div>
     <header class="pos-modal-header">
       <div class="pos-modal-badge" :class="{ 'pos-modal-danger':actionDialog==='remove' }"><pos-icon :name="actionIcon"></pos-icon></div>
       <div class="pos-modal-heading">
-        <span class="eyebrow">{{actionDialog==='order' ? 'ORDER HISTORY' : actionDialog==='customer'?'REGISTER':actionDialog.startsWith('purchase-')?'PURCHASE RECEIVING':page==='inventory'?'INVENTORY':manage?.title}}</span>
+        <span class="eyebrow">{{actionDialog==='order' ? 'ORDER HISTORY' : actionDialog==='customer'?'REGISTER':actionDialog==='supplier-ledger'?'SUPPLIERS':actionDialog.startsWith('purchase-')?'PURCHASE RECEIVING':page==='inventory'?'INVENTORY':manage?.title}}</span>
         <h2 id="action-title">{{actionTitle}}</h2>
       </div>
       <button type="button" class="icon-button pos-modal-close" aria-label="Close popup" @click="closeActionDialog()" :disabled="managementBusy"><pos-icon name="close"></pos-icon></button>
@@ -645,7 +650,7 @@
     <form v-else-if="actionDialog==='purchase-form' && purchaseForm" class="pos-modal-content" @submit.prevent="savePurchase">
       <div class="pos-modal-body purchase-form">
         <p v-if="purchaseError" class="mg-error" role="alert">{{purchaseError}}</p>
-        <p class="pos-modal-description">Post the delivery after checking the quantities received. Posting adds stock immediately and does not record a supplier payment.</p>
+        <p class="pos-modal-description">Post the delivery to add stock. Leave payment off if you have not paid the supplier.</p>
         <fieldset class="purchase-fields" :disabled="managementBusy || Boolean(purchasePending)">
           <div class="mg-field-grid">
             <div class="mg-field">
@@ -679,20 +684,42 @@
           </div>
           <button type="button" class="secondary" @click="addPurchaseLine" :disabled="!purchaseForm.supplier_id || purchaseForm.lines.length>=50"><pos-icon name="add"></pos-icon> Add product</button>
           <label class="mg-field purchase-note">Note (optional)<textarea v-model.trim="purchaseForm.note" maxlength="240" rows="2"></textarea></label>
+          <button class="secondary" type="button" @click="toggleSupplierPayment">{{supplierPayment?'Remove payment':'Add payment (optional)'}}</button>
+          <section v-if="supplierPayment" class="supplier-payment-fields" aria-label="Optional initial payment">
+            <div class="mg-field-grid">
+              <label class="mg-field">Payment amount (PKR)
+                <input v-model.trim="supplierPayment.amount" inputmode="decimal" maxlength="18" placeholder="0.00" required>
+              </label>
+              <label class="mg-field">Payment source
+                <select v-model="supplierPayment.source" @change="supplierPaymentSourceChanged">
+                  <option value="external">Outside cash drawer</option><option value="drawer">From cash drawer</option>
+                </select>
+              </label>
+              <label class="mg-field">Payment note (optional)
+                <input v-model.trim="supplierPayment.note" maxlength="160" placeholder="e.g. payment reference">
+              </label>
+            </div>
+            <p v-if="supplierPayment.source==='drawer'" class="report-caption">
+              <template v-if="paymentDrawer?.active">Shift {{recordRef(paymentDrawer?.active.id)}} · Expected cash {{reportMoney(paymentDrawer?.active.expected_minor)}}. This records a cash-out entry automatically.</template>
+              <template v-else-if="paymentDrawerError">Could not check the drawer. <button type="button" class="order-ref-link" @click="loadPaymentDrawer">Retry</button></template>
+              <template v-else>{{paymentDrawer?'Open a cash drawer shift before posting.':'Checking cash drawer…'}}</template>
+            </p>
+            <p v-else class="report-caption">This records a payment already made outside the drawer. It does not move money.</p>
+          </section>
         </fieldset>
       </div>
       <footer class="pos-modal-footer purchase-footer">
         <div class="purchase-footer-total">Total purchase cost <strong>{{reportMoney(purchaseTotal)}}</strong></div>
         <button type="button" class="secondary" @click="closeActionDialog()" :disabled="managementBusy">{{purchasePending?'Close':'Cancel'}}</button>
-        <button v-if="purchasePending" type="button" class="primary" @click="submitPurchase" :disabled="managementBusy">{{managementBusy?'Posting…':'Retry original receipt'}}</button>
+        <button v-if="purchasePending" type="button" class="primary" @click="submitPurchase" :disabled="managementBusy">{{managementBusy?'Posting…':supplierRetryLabel}}</button>
         <button v-else type="submit" class="primary" :disabled="managementBusy || !purchaseForm.supplier_id">Post receipt</button>
       </footer>
     </form>
     <template v-else-if="actionDialog==='purchase-detail'">
       <div class="pos-modal-body">
         <p v-if="purchaseDetailBusy" role="status">Loading purchase receipt…</p>
-        <p v-else-if="purchaseError" class="mg-error" role="alert">{{purchaseError}} <button type="button" class="secondary" @click="loadPurchaseDetail(purchaseDetailId)">Retry</button></p>
-        <template v-else-if="purchaseDetail">
+        <p v-if="purchaseError" class="mg-error" role="alert">{{purchaseError}} <button v-if="!purchaseDetail" type="button" class="secondary" @click="loadPurchaseDetail(purchaseDetailId)">Retry</button></p>
+        <template v-if="purchaseDetail && !purchaseDetailBusy">
           <dl class="purchase-summary">
             <div><dt>Supplier</dt><dd>{{purchaseDetail.supplier_name}}</dd></div>
             <div><dt>Supplier invoice / reference</dt><dd>{{purchaseDetail.invoice_reference||'—'}}</dd></div>
@@ -704,12 +731,90 @@
             <thead><tr><th scope="col">Product</th><th scope="col">Received</th><th scope="col">Unit cost</th><th scope="col">Line cost</th></tr></thead>
             <tbody><tr v-for="line in purchaseDetail.lines" :key="line.id"><td>{{line.name}} <small v-if="line.internal_code">· {{line.internal_code}}</small></td><td>{{quantity(line.quantity_milli/1000)}} {{line.unit}}</td><td>{{reportMoney(line.unit_cost_minor)}}</td><td>{{reportMoney(line.total_minor)}}</td></tr></tbody>
           </table></div>
-        </template>
+          <dl v-if="purchaseDetail.payment_tracking" class="purchase-summary supplier-payment-summary">
+            <div><dt>Total cost</dt><dd>{{reportMoney(purchaseDetail.total_minor)}}</dd></div>
+            <div><dt>Paid</dt><dd>{{reportMoney(purchaseDetail.paid_minor)}}</dd></div>
+            <div><dt>Balance</dt><dd>{{reportMoney(purchaseDetail.balance_minor)}}</dd></div>
+            <div><dt>Status</dt><dd><span class="supplier-payment-badge" :data-payment-status="purchaseDetail.payment_status">{{paymentStatusLabel(purchaseDetail.payment_status)}}</span></dd></div>
+          </dl>
+          <p v-else class="report-caption">Payment was not tracked for this older receipt. Its balance is unknown.</p>
+          <form v-if="supplierPayment" class="supplier-payment-fields" @submit.prevent="saveSupplierPayment">
+            <fieldset class="purchase-fields" :disabled="managementBusy || Boolean(purchasePending)">
+            <div class="mg-field-grid">
+              <label class="mg-field">Payment amount (PKR)
+                <input v-model.trim="supplierPayment.amount" inputmode="decimal" maxlength="18" placeholder="0.00" required>
+              </label>
+              <label class="mg-field">Payment source
+                <select v-model="supplierPayment.source" @change="supplierPaymentSourceChanged">
+                  <option value="external">Outside cash drawer</option><option value="drawer">From cash drawer</option>
+                </select>
+              </label>
+              <label class="mg-field">Payment note (optional)
+                <input v-model.trim="supplierPayment.note" maxlength="160" placeholder="e.g. payment reference">
+              </label>
+            </div>
+            <p v-if="supplierPayment.source==='drawer'" class="report-caption">
+              <template v-if="paymentDrawer?.active">Shift {{recordRef(paymentDrawer?.active.id)}} · Expected cash {{reportMoney(paymentDrawer?.active.expected_minor)}}. This records a cash-out entry automatically.</template>
+              <template v-else-if="paymentDrawerError">Could not check the drawer. <button type="button" class="order-ref-link" @click="loadPaymentDrawer">Retry</button></template>
+              <template v-else>{{paymentDrawer?'Open a cash drawer shift before posting.':'Checking cash drawer…'}}</template>
+            </p>
+            <p v-else class="report-caption">This records a payment already made outside the drawer. It does not move money.</p>
+            </fieldset>
+            <div class="mg-actions">
+              <button type="button" class="secondary" @click="toggleSupplierPayment" :disabled="managementBusy || Boolean(purchasePending)">Cancel payment entry</button>
+              <button v-if="purchasePending?.kind==='payment'" type="button" class="primary" @click="submitPurchase" :disabled="managementBusy">{{supplierRetryLabel}}</button>
+              <button v-else type="submit" class="primary" :disabled="managementBusy || Boolean(purchasePending)">Save payment</button>
+            </div>
+          </form>
+          <h3>Payment history</h3>
+        <p v-if="paymentHistoryError" class="mg-error" role="alert">{{paymentHistoryError}} <button type="button" class="order-ref-link" @click="loadSupplierPaymentHistory(1)">Retry</button></p>
+        <p v-else-if="paymentHistoryBusy" class="report-caption" role="status">Loading payments…</p>
+        <p v-else-if="!paymentHistory?.data.length" class="report-caption">No payments recorded.</p>
+        <template v-else>
+          <div class="mg-table-wrap"><table class="mg-table">
+            <thead><tr><th v-if="actionDialog==='supplier-ledger'" scope="col">Purchase</th><th scope="col">Posted (PKT)</th><th scope="col">Amount</th><th scope="col">Source</th><th scope="col">Recorded by</th><th scope="col">Note</th></tr></thead>
+            <tbody><tr v-for="entry in paymentHistory.data" :key="entry.id">
+              <td v-if="actionDialog==='supplier-ledger'"><button type="button" class="order-ref-link" @click="showPurchase(entry.receipt_id)">{{purchaseRef(entry.receipt_id)}}</button></td>
+              <td>{{receiptDate(entry.posted_at)}}</td><td>{{reportMoney(entry.amount_minor)}}</td>
+              <td>{{entry.source==='drawer'?'Cash drawer · '+recordRef(entry.cash_session_id):'Outside drawer'}}</td><td>{{entry.actor}}</td><td>{{entry.note||'—'}}</td>
+            </tr></tbody>
+          </table></div>
+          <pos-table-pagination :meta="paymentHistory.meta" :size="paymentHistorySize" :busy="paymentHistoryBusy" @page="loadSupplierPaymentHistory" @size="changeSupplierPaymentPageSize"></pos-table-pagination>
+        </template>        </template>
       </div>
       <footer class="pos-modal-footer purchase-footer">
         <div v-if="purchaseDetail" class="purchase-footer-total">Total purchase cost <strong>{{reportMoney(purchaseDetail.total_minor)}}</strong></div>
-        <button type="button" class="secondary" @click="closeActionDialog()">Close</button>
+        <button type="button" class="secondary" @click="closeActionDialog()" :disabled="managementBusy">Close</button>
+        <button v-if="purchaseDetail?.balance_minor>0 && !supplierPayment" type="button" class="primary" @click="toggleSupplierPayment"
+          :disabled="managementBusy || Boolean(purchasePending)">Record payment</button>
       </footer>
+    </template>
+    <template v-else-if="actionDialog==='supplier-ledger'">
+      <div class="pos-modal-body">
+        <template v-if="supplierLedgerSummary">
+          <dl class="purchase-summary supplier-payment-summary">
+            <div><dt>Tracked purchases</dt><dd>{{reportMoney(supplierLedgerSummary.total_minor)}}</dd></div>
+            <div><dt>Total paid</dt><dd>{{reportMoney(supplierLedgerSummary.paid_minor)}}</dd></div>
+            <div><dt>Outstanding balance</dt><dd>{{reportMoney(supplierLedgerSummary.balance_minor)}}</dd></div>
+          </dl>
+          <p v-if="supplierLedgerSummary.untracked_receipts" class="report-caption">{{supplierLedgerSummary.untracked_receipts}} older purchase receipt(s) have unknown payment balances and are excluded.</p>
+        </template>
+        <p v-if="paymentHistoryError" class="mg-error" role="alert">{{paymentHistoryError}} <button type="button" class="order-ref-link" @click="loadSupplierPaymentHistory(1)">Retry</button></p>
+        <p v-else-if="paymentHistoryBusy" class="report-caption" role="status">Loading payments…</p>
+        <p v-else-if="!paymentHistory?.data.length" class="report-caption">No payments recorded.</p>
+        <template v-else>
+          <div class="mg-table-wrap"><table class="mg-table">
+            <thead><tr><th v-if="actionDialog==='supplier-ledger'" scope="col">Purchase</th><th scope="col">Posted (PKT)</th><th scope="col">Amount</th><th scope="col">Source</th><th scope="col">Recorded by</th><th scope="col">Note</th></tr></thead>
+            <tbody><tr v-for="entry in paymentHistory.data" :key="entry.id">
+              <td v-if="actionDialog==='supplier-ledger'"><button type="button" class="order-ref-link" @click="showPurchase(entry.receipt_id)">{{purchaseRef(entry.receipt_id)}}</button></td>
+              <td>{{receiptDate(entry.posted_at)}}</td><td>{{reportMoney(entry.amount_minor)}}</td>
+              <td>{{entry.source==='drawer'?'Cash drawer · '+recordRef(entry.cash_session_id):'Outside drawer'}}</td><td>{{entry.actor}}</td><td>{{entry.note||'—'}}</td>
+            </tr></tbody>
+          </table></div>
+          <pos-table-pagination :meta="paymentHistory.meta" :size="paymentHistorySize" :busy="paymentHistoryBusy" @page="loadSupplierPaymentHistory" @size="changeSupplierPaymentPageSize"></pos-table-pagination>
+        </template>
+      </div>
+      <footer class="pos-modal-footer"><button type="button" class="secondary" @click="closeActionDialog()">Close</button></footer>
     </template>
     <form v-else-if="actionDialog==='stock'" class="pos-modal-content" @submit.prevent="saveStock">
       <div class="pos-modal-body">

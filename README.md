@@ -60,7 +60,7 @@ Run the Laravel migration before using the updated frontend. The register shows 
 2. In **Products**, use Add/Edit to set an optional **Preferred supplier**. The product table shows the link and can be filtered by supplier; **Suppliers** shows the number of linked products.
 3. Open **Purchases** from the top bar or **Purchase Receiving** from Inventory. Choose **Receive stock**, select the actual supplier, and pick products by name, barcode, or product code. Products linked to that supplier appear first. Other active products can still be received without changing their preferred supplier.
 4. Enter received quantity and per-unit cost for each product, and optionally the supplier invoice reference and a note. **Post receipt** increases stock immediately. Open the saved receipt from the supplier-filtered history or from Inventory's stock history.
-5. If the post is not confirmed, retry the original receipt in the same tab instead of entering it again. This records stock and cost, not a supplier payment.
+5. If the post is not confirmed, retry the original receipt in the same tab instead of entering it again. Stock is posted even if the optional payment is left off.
 
 ## Customers and receipt display
 
@@ -79,3 +79,9 @@ In **Settings → Receipt paper size**, choose **58 mm** or **80 mm**, check the
 ### Low-stock alerts
 
 The top-bar bell shows the number of active products at or below their inventory threshold. The count includes out-of-stock products, and the badge turns red if any are out of stock. The bell opens **Inventory** filtered to **Low stock only** and **Active only** without changing the working cart. Set thresholds in Inventory. The badge updates after stock-changing actions and roughly once a minute while the tab is visible; returning to the tab refreshes it too. Alerts are in-app only.
+
+### Supplier payments
+
+In **Purchases → Receive stock**, use **Add payment (optional)** for an amount already paid at receiving. Open a purchase receipt to see its total, paid and outstanding amounts, status, and payment history. **Record payment** adds a later installment. Choose **From cash drawer** only when the money came out of the current open shift; the app records the cash-out automatically. Choose **Outside cash drawer** otherwise. Do not also add a manual cash-out for the same payment.
+
+In **Suppliers**, use the cash icon for the supplier's tracked balance and payment history. Older receipts show **Not tracked**, not zero due. They are excluded from these totals and need separate reconciliation. If posting is not confirmed, retry the original entry from the same browser tab and check physical handoff before paying again.

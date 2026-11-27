@@ -348,3 +348,10 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 .stock-alert-button.stock-alert-active>.remix-icon{color:#824b00}
 .stock-alert-count{position:absolute;top:3px;right:0;min-width:17px;height:17px;padding:0 3px;border-radius:9px;background:#754400;color:white;font-size:10px;font-weight:800;line-height:17px;text-align:center;font-variant-numeric:tabular-nums}
 .stock-alert-count.stock-alert-empty{background:#ad2443}
+
+.supplier-payment-summary,.supplier-payment-fields{border:1px solid var(--border);border-radius:8px;background:#faf7fa;padding:12px;margin-block:12px}
+.supplier-payment-fields .mg-actions{margin-top:10px;flex-wrap:wrap}
+.supplier-payment-badge{display:inline-block;padding:3px 8px;border-radius:10px;font-size:12px;font-weight:700;white-space:nowrap;background:#eee8ef;color:#574e59}
+.supplier-payment-badge[data-payment-status="partial"]{background:#fff0d9;color:#684008}
+.supplier-payment-badge[data-payment-status="unpaid"]{background:#fbe4ec;color:#8d2540}
+.supplier-payment-badge[data-payment-status="paid"]{background:#e1f2e7;color:#255739}

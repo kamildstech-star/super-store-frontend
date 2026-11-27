@@ -77,12 +77,13 @@ const manager = {
  customers:{title:'Customers',single:'Customer',icon:'user',columns:['Name','Email','Phone'],fields:[
    {key:'name',label:'Name',maxlength:120},{key:'email',label:'Email (optional)',type:'email',maxlength:254,optional:true},
    {key:'phone',label:'Phone (optional)',type:'tel',maxlength:40,optional:true}]},
- suppliers:{title:'Suppliers',single:'Supplier',columns:['Name','Email','Phone','Linked products'],fields:[
+ suppliers:{title:'Suppliers',single:'Supplier',columns:['Name','Email','Phone','Linked products','Tracked balance'],fields:[
    {key:'name',label:'Name'},{key:'email',label:'Email (optional)',type:'email',optional:true},
    {key:'phone',label:'Phone (optional)',type:'tel',optional:true}]},
 };
 const purchaseStorageKey='super-store.pos.purchase.v1:';
 let purchaseLineId=0;
+const supplierPaymentForm=()=>({amount:'',source:'external',note:''});
 const purchaseLine=()=>({key:++purchaseLineId,productId:'',quantity:'',cost:''});
 const decimalMinor=(value,places)=>{
  const match=/^(\d+)(?:\.(\d+))?$/.exec(String(value).trim());
@@ -161,6 +162,8 @@ const PosRegister = Vue.defineComponent({
    openingCash:'',drawerMove:{kind:'in',amount:'',reason:''},closeShift:null,countedCash:'',
    returnOrderId:null,returnOrderReference:null,returnOrderBusinessDate:null,returnRows:[],returnHistory:null,returnReason:'',returnError:'',returnQuote:null,returnDrawer:null,returnBusy:false,returnRequest:0,
    purchaseSupplier:'',productSupplier:'',purchaseOptions:[],purchaseOptionsState:'idle',purchaseOptionRequest:0,
+   supplierPayment:null,supplierLedgerId:null,supplierLedgerName:'',supplierLedgerSummary:null,paymentHistory:null,
+   paymentHistorySize:15,paymentHistoryBusy:false,paymentHistoryError:'',paymentHistoryRequest:0,
    purchaseForm:null,purchaseError:'',purchaseDetail:null,purchaseDetailId:null,purchaseDetailRequest:0,purchaseDetailBusy:false,purchasePending:null,
    customerChoice:null,customerCandidates:[],customerLookupRequest:0,customerLookupTimer:null,customerSearch:'',customerLookupBusy:false,
    customerLookupError:false,customerHasMore:false,customerCreateForm:null,customerCreateError:'',
@@ -204,11 +207,14 @@ const PosRegister = Vue.defineComponent({
          preferred?'Preferred supplier':p.supplier_id?'Different preferred supplier':'No preferred supplier'].filter(Boolean).join(' · '),preferred};
      }).sort((a,b)=>Number(b.preferred)-Number(a.preferred));
    },
+   supplierRetryLabel(){return this.purchasePending?.kind==='payment'?'Retry original payment':'Retry original receipt';},
+   supplierPaymentLimit(){return this.actionDialog==='purchase-form'?this.purchaseTotal:BigInt(this.purchaseDetail?.balance_minor??0);},
    purchaseTotal(){
      return this.purchaseForm?.lines.reduce((sum,line)=>sum+this.purchaseLineTotal(line),0n)??0n;
    },
    actionTitle(){
      if(this.actionDialog==='customer')return this.customerCreateForm?'Add customer':'Customer';
+     if(this.actionDialog==='supplier-ledger')return 'Supplier payments · '+this.supplierLedgerName;
      if(this.actionDialog==='purchase-form')return 'Receive stock';
      if(this.actionDialog==='purchase-detail')return 'Purchase receipt '+this.purchaseRef(this.purchaseDetailId);
      if(this.actionDialog==='stock')return 'Update stock · '+this.inventoryItem?.name;
@@ -218,7 +224,7 @@ const PosRegister = Vue.defineComponent({
      if(this.actionDialog==='remove')return (this.archivable?'Archive ':'Delete ')+(this.managementDelete?.name??'record')+'?';
      return (this.managementForm?.id?'Edit ':'New ')+(this.manage?.single??'record');
    },
-   actionIcon(){return ({customer:'user',order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:'trash',stock:'archive','stock-history':'orders','purchase-form':'archive','purchase-detail':'orders'})[this.actionDialog];},
+   actionIcon(){return ({customer:'user',order:'orders',view:'view',form:this.managementForm?.id?'edit':'add',remove:'trash',stock:'archive','stock-history':'orders','supplier-ledger':'cash','purchase-form':'archive','purchase-detail':'orders'})[this.actionDialog];},
    archivable(){return ['products','customers'].includes(this.page);},
    categoryName(){return this.categories.find(c=>c.id===this.category)?.name??'All products';},
    manage(){return this.manager[this.page];},
@@ -789,13 +795,59 @@ const PosRegister = Vue.defineComponent({
    startPurchase(){
      if(this.purchasePending||this.optionsState!=='ready'||this.purchaseOptionsState!=='ready')return;
      this.purchaseForm={supplier_id:this.purchaseSupplier,invoice_reference:'',note:'',lines:[purchaseLine()]};
-     this.purchaseError='';this.openActionDialog('purchase-form');
+     this.supplierPayment=null;this.purchaseError='';this.openActionDialog('purchase-form');
    },
    addPurchaseLine(){if(this.purchaseForm.lines.length<50)this.purchaseForm.lines.push(purchaseLine());},
    async showPurchase(id){
-     this.purchaseDetailId=id;this.purchaseDetail=null;this.purchaseError='';
+     this.purchaseDetailId=id;this.purchaseDetail=null;this.purchaseError='';this.supplierPayment=null;this.paymentHistory=null;
      this.openActionDialog('purchase-detail');
-     return this.loadPurchaseDetail(id);
+     return Promise.all([this.loadPurchaseDetail(id),this.loadSupplierPaymentHistory(1)]);
+   },
+   openSupplierLedger(supplier){
+     this.supplierLedgerId=supplier.id;this.supplierLedgerName=supplier.name;this.supplierLedgerSummary=null;this.paymentHistory=null;
+     this.openActionDialog('supplier-ledger');return this.loadSupplierPaymentHistory(1);
+   },
+   async loadSupplierPaymentHistory(page=1){
+     const ledger=this.actionDialog==='supplier-ledger';
+     const path=ledger?'/suppliers/'+this.supplierLedgerId:'/purchases/'+this.purchaseDetailId;
+     const request=++this.paymentHistoryRequest;
+     this.paymentHistoryBusy=true;this.paymentHistoryError='';
+     try{
+       const result=await posRequest('/api/pos'+path+'/payments?page='+page+'&per_page='+this.paymentHistorySize);
+       if(request!==this.paymentHistoryRequest)return;
+       this.paymentHistory=result;
+       if(ledger)this.supplierLedgerSummary=result.summary;
+     }catch(err){
+       if(request===this.paymentHistoryRequest&&!(await this.expireSession(err)))this.paymentHistoryError=err.message;
+     }finally{if(request===this.paymentHistoryRequest)this.paymentHistoryBusy=false;}
+   },
+   changeSupplierPaymentPageSize(size){this.paymentHistorySize=Number(size);return this.loadSupplierPaymentHistory(1);},
+   paymentStatusLabel(status){return ({unpaid:'Unpaid',partial:'Partial',paid:'Paid',untracked:'Not tracked'})[status]??'Not tracked';},
+   toggleSupplierPayment(){
+     this.supplierPayment=this.supplierPayment?null:supplierPaymentForm();this.purchaseError='';
+   },
+   supplierPaymentSourceChanged(){
+     if(this.supplierPayment?.source==='drawer')void this.loadPaymentDrawer();
+   },
+   supplierPaymentPayload(){
+     const amount=parseCash(this.supplierPayment.amount);
+     if(!amount||BigInt(amount)>this.supplierPaymentLimit)throw new Error('Enter a positive payment that does not exceed the purchase balance.');
+     const drawer=this.supplierPayment.source==='drawer';
+     if(drawer&&!this.paymentDrawer?.active)throw new Error('An open cash drawer is required for a drawer payment.');
+     return {amount_minor:amount,source:this.supplierPayment.source,cash_session_id:drawer?this.paymentDrawer.active.id:null,note:this.supplierPayment.note?.trim()||null};
+   },
+   async saveSupplierPayment(){
+     if(this.purchasePending||this.managementBusy||!this.purchaseDetail||!this.supplierPayment)return;
+     try{
+       const payment=this.supplierPaymentPayload();
+       this.persistPurchaseAttempt({kind:'payment',receiptId:this.purchaseDetail.id,body:{request_id:crypto.randomUUID(),...payment}});
+     }catch(err){this.purchaseError=err.message;return;}
+     await this.submitPurchase();
+   },
+   persistPurchaseAttempt(pending){
+     try{sessionStorage.setItem(this.purchaseKey(),JSON.stringify(pending));}
+     catch{throw new Error('This tab could not save a retry copy. Nothing was posted. Try a browser with session storage enabled.');}
+     this.purchasePending=pending;
    },
    async loadPurchaseDetail(id){
      const seq=++this.purchaseDetailRequest;
@@ -820,39 +872,47 @@ const PosRegister = Vue.defineComponent({
      }
      try{
        const pending={request_id:crypto.randomUUID(),supplier_id:Number(form.supplier_id),
-         invoice_reference:form.invoice_reference||null,note:form.note||null,lines};
-       sessionStorage.setItem(this.purchaseKey(),JSON.stringify(pending));
-       this.purchasePending=pending;
-     }catch{
-       this.purchaseError='This tab could not save a retry copy. No stock was posted. Try a browser with session storage enabled.';return;
-     }
+         invoice_reference:form.invoice_reference||null,note:form.note||null,lines,
+         ...(this.supplierPayment?{payment:this.supplierPaymentPayload()}:{})};
+       this.persistPurchaseAttempt(pending);
+     }catch(err){this.purchaseError=err.message;return;}
      await this.submitPurchase();
    },
    async submitPurchase(){
      if(!this.purchasePending||this.managementBusy)return;
      const pending=this.purchasePending,key=this.purchaseKey();
+     const isPayment=pending.kind==='payment';
+     const path=isPayment?'/api/pos/purchases/'+pending.receiptId+'/payments':'/api/pos/purchases';
      this.managementBusy=true;this.purchaseError='';
      try{
-       const receipt=await posRequest('/api/pos/purchases',{method:'POST',body:pending,csrf:this.csrf});
+       const result=await posRequest(path,{method:'POST',body:isPayment?pending.body:pending,csrf:this.csrf});
+       if(!result?.id||(isPayment?result.receipt_id!==pending.receiptId:!Array.isArray(result.lines)))
+         throw new Error('The server did not confirm the expected supplier entry.');
        this.purchasePending=null;
        try{sessionStorage.removeItem(key);}catch{}
+       const receiptId=isPayment?result.receipt_id:result.id;
        if(this.actionDialog==='purchase-form')this.closeActionDialog(true);
-       this.notify('success',this.purchaseRef(receipt.id)+' posted. Stock updated.','Purchase received');
-       void this.loadStockAlerts(true);
-       if(this.page==='purchases'){
+       this.supplierPayment=null;
+       this.notify('success',this.purchaseRef(receiptId)+(isPayment?' payment recorded.':' posted. Stock updated.'),isPayment?'Supplier payment recorded':'Purchase received');
+       if(!isPayment)void this.loadStockAlerts(true);
+       if(['purchases','suppliers'].includes(this.page)){
          await this.loadListing(1);
-         await this.showPurchase(receipt.id);
+         await this.showPurchase(receiptId);
+       }else if(this.actionDialog==='purchase-detail'||isPayment){
+         await this.showPurchase(receiptId);
        }else if(this.page==='register'){await this.loadCatalog();}
        else if(this.page==='inventory'){await this.loadListing();}
      }catch(err){
-       if(err.status===422){
+       if([403,404,409,422].includes(err.status)){
          this.purchasePending=null;
          try{sessionStorage.removeItem(key);}catch{}
-         if(this.actionDialog==='purchase-form')this.purchaseError=err.message;
-         else this.notify('error',err.message,'Purchase was not posted');
+         if((isPayment?pending.body:pending.payment)?.source==='drawer')void this.loadPaymentDrawer();
+         if(this.actionDialog==='purchase-form'||this.actionDialog==='purchase-detail')this.purchaseError=err.message;
+         else this.notify('error',err.message,'Supplier entry not posted');
        }else if(!(await this.expireSession(err))){
-         if(this.actionDialog==='purchase-form')this.purchaseError='Posting not confirmed. Retry this exact receipt before entering it again. '+err.message;
-         else this.notify('warning',err.message,'Purchase posting not confirmed');
+         const message='Posting not confirmed. Retry this exact '+(isPayment?'payment':'receipt')+' before entering it again.';
+         if(this.actionDialog==='purchase-form'||this.actionDialog==='purchase-detail')this.purchaseError=message+' '+err.message;
+         else this.notify('warning',message,'Supplier entry not confirmed');
        }
      }finally{this.managementBusy=false;}
    },
@@ -917,6 +977,7 @@ const PosRegister = Vue.defineComponent({
        clearTimeout(this.customerLookupTimer);this.customerLookupRequest++;
        this.customerCandidates=[];this.customerChoice=null;this.customerCreateForm=null;this.customerCreateError='';
      }
+     this.paymentHistoryRequest++;this.paymentHistoryBusy=false;this.paymentHistory=null;this.supplierLedgerSummary=null;this.supplierPayment=null;
      this.purchaseDetailRequest++;this.purchaseDetailBusy=false;this.purchaseDetail=null;this.purchaseForm=null;this.purchaseError='';
      this.resetProductImage();
      this.actionDialog='';this.managementForm=null;this.managementDelete=null;
@@ -1170,7 +1231,7 @@ const PosRegister = Vue.defineComponent({
      if(this.page==='categories')return [row.name,row.slug];
      if(this.page==='units')return [row.name,row.code,row.quantity_precision];
      const contact=[row.name,row.email||'—',row.phone||'—'];
-     return this.page==='suppliers'?[...contact,row.products_count??0]:contact;
+     return this.page==='suppliers'?[...contact,row.products_count??0,this.reportMoney(row.supplier_balance_minor??0)]:contact;
    },
    async loadCatalog(){
      const scope=this.cartScope;
