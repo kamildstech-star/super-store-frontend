@@ -75,3 +75,7 @@ Open the **Settings** gear in the top bar. Set the store name and optionally the
 ### Receipt paper size
 
 In **Settings → Receipt paper size**, choose **58 mm** or **80 mm**, check the preview, and save. This store-wide default applies to sale and refund printing and reprints after reload. It changes the layout, not the recorded sale, refund, or original receipt brand. Choose the same stock size in the browser/printer driver; the POS does not set driver media or a fixed roll length. Test the fit on the actual printer before going live. Run the matching backend migration to enable the setting.
+
+### Low-stock alerts
+
+The top-bar bell shows the number of active products at or below their inventory threshold. The count includes out-of-stock products, and the badge turns red if any are out of stock. The bell opens **Inventory** filtered to **Low stock only** and **Active only** without changing the working cart. Set thresholds in Inventory. The badge updates after stock-changing actions and roughly once a minute while the tab is visible; returning to the tab refreshes it too. Alerts are in-app only.

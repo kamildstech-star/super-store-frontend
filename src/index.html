@@ -46,6 +46,13 @@
         <button type="button" @click="openDialog('help')"><pos-icon name="register"></pos-icon> Keyboard shortcuts</button>
       </div>
     </div>
+    <button type="button" data-key-target class="pos-nav-button stock-alert-button" :class="{'stock-alert-active':stockAlerts?.alert_count}"
+      :aria-label="stockAlertSummary" :title="stockAlertSummary" @click="openStockAlerts" :disabled="managementBusy">
+      <pos-icon name="stockAlert"></pos-icon>
+      <span v-if="stockAlerts?.alert_count" aria-hidden="true" class="stock-alert-count" :class="{'stock-alert-empty':stockAlerts.out_of_stock_count}">
+        {{stockAlerts.alert_count>99?'99+':stockAlerts.alert_count}}
+      </span>
+    </button>
     <div class="menu-wrap" data-header-popover="profile">
       <button data-key-target class="avatar profile-toggle" type="button" aria-controls="profile-dropdown" aria-label="Profile" title="Profile" :aria-expanded="profile" @click="profile=!profile; menu=false"><pos-icon name="user"></pos-icon></button>
       <div id="profile-dropdown" v-show="profile" class="menu-panel pos-dropdown profile-menu" role="group" aria-label="Signed-in profile">
@@ -393,10 +400,13 @@
   <div class="mg-page-head">
     <div><span class="eyebrow">POINT OF SALE</span><h1>Inventory</h1></div>
     <div class="mg-actions">
-      <button type="button" class="secondary" @click="loadListing()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
+      <button type="button" class="secondary" @click="refreshInventory()" :disabled="listBusy"><pos-icon name="refresh"></pos-icon> Refresh</button>
       <button type="button" class="primary" @click="goPage('purchases')"><pos-icon name="basket"></pos-icon> Purchase Receiving</button>
     </div>
   </div>
+  <p v-if="inventoryLow && inventoryStatus==='active' && stockAlerts" class="report-caption" role="status">
+    {{stockAlertSummary}}. Products appear here when stock reaches or falls below their threshold.
+  </p>
   <section class="mg-list" aria-label="Inventory records" :aria-busy="listBusy">
     <div class="mg-list-tools inventory-tools">
       <input :value="listQuery" @input="listingSearch($event.target.value)" type="search" maxlength="100" aria-label="Search inventory" placeholder="Search product, code or barcode…">

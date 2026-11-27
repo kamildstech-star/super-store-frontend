@@ -98,6 +98,7 @@ const storeFormValues=form=>({
  name:form.name.trim(),address:form.address?.trim()||null,phone:form.phone?.trim()||null,
  receipt_footer:form.receipt_footer?.trim()||null,receipt_width_mm:receiptWidth(form.receipt_width_mm),
 });
+const stockAlertInterval=60000;
 const emptyManagement=()=>({categories:[],units:[],suppliers:[]});
 const emptyReportFilters=()=>({period:'today',from:'',to:'',cashier:''});
 const reportInteger=new Intl.NumberFormat('en-PK',{maximumFractionDigits:0});
@@ -163,6 +164,7 @@ const PosRegister = Vue.defineComponent({
    purchaseForm:null,purchaseError:'',purchaseDetail:null,purchaseDetailId:null,purchaseDetailRequest:0,purchaseDetailBusy:false,purchasePending:null,
    customerChoice:null,customerCandidates:[],customerLookupRequest:0,customerLookupTimer:null,customerSearch:'',customerLookupBusy:false,
    customerLookupError:false,customerHasMore:false,customerCreateForm:null,customerCreateError:'',
+   stockAlerts:null,stockAlertsBusy:false,stockAlertsError:false,stockAlertsRequest:0,stockAlertsTimer:null,editExitStockAlerts:false,
    inventoryLow:false,inventoryStatus:'',inventoryItem:null,stockForm:null,stockError:'',
    stockHistory:[],stockHistoryMeta:emptyPage(),stockHistoryBusy:false,stockHistoryRequest:0,
    stockTypes:{opening:'Opening stock',receipt:'Supplier receipt',adjustment:'Stock adjustment',damage:'Damage',sale:'Sale',return:'Return restock'},
@@ -186,6 +188,11 @@ const PosRegister = Vue.defineComponent({
    canFinalize(){return !this.cashPending&&this.paymentDrawer!==null&&(!this.paymentDrawer.tracking_enabled||Boolean(this.paymentDrawer.active))&&this.cashMinor!==null&&this.cashMinor>=this.total;},
    settingsValues(){return this.settingsForm?storeFormValues(this.settingsForm):null;},
    settingsDirty(){return this.settingsValues&&Object.keys(this.settingsValues).some(key=>this.settingsValues[key]!==this.storeProfile[key]);},
+   stockAlertSummary(){
+     if(!this.stockAlerts)return this.stockAlertsError?'Stock alerts unavailable':'Stock alerts';
+     const {alert_count:count,out_of_stock_count:empty}=this.stockAlerts;
+     return count?'Stock alerts: '+count+(count===1?' product needs':' products need')+' replenishment, '+empty+' out of stock':'Stock alerts: no active products need replenishment';
+   },
    activeReceiptWidth(){return receiptWidth(this.storeProfile.receipt_width_mm);},
    receiptBrand(){return (this.receiptOrder?.refund??this.receiptOrder)?.receipt_store??defaultStore();},
    purchaseLookup(){return new Map(this.purchaseOptions.map(product=>[String(product.id),product]));},
@@ -237,12 +244,16 @@ const PosRegister = Vue.defineComponent({
    window.addEventListener('keydown',this.keyboard);
    document.addEventListener('pointerdown',this.closeOutsideHeader);
    document.addEventListener('focusin',this.closeOutsideHeader);
+   document.addEventListener('visibilitychange',this.refreshVisibleStockAlerts);
+   this.stockAlertsTimer=setInterval(this.refreshVisibleStockAlerts,stockAlertInterval);
  },
  beforeUnmount(){
    clearTimeout(this.listTimer);clearTimeout(this.customerLookupTimer);
    window.removeEventListener('keydown',this.keyboard);
    document.removeEventListener('pointerdown',this.closeOutsideHeader);
    document.removeEventListener('focusin',this.closeOutsideHeader);
+   document.removeEventListener('visibilitychange',this.refreshVisibleStockAlerts);
+   clearInterval(this.stockAlertsTimer);this.stockAlertsRequest++;
  },
  methods:{
    art,
@@ -295,7 +306,7 @@ const PosRegister = Vue.defineComponent({
        this.readCashRecovery();
        this.readPurchaseRecovery();
        this.authState=this.user?'ready':'guest';
-       if(this.user)await Promise.all([this.loadCatalog(),this.loadStoreSettings()]);
+       if(this.user)await Promise.all([this.loadCatalog(),this.loadStoreSettings(),this.loadStockAlerts()]);
      }catch(err){this.authState='unavailable';this.authError=err.message;}
    },
    async login(){
@@ -307,7 +318,7 @@ const PosRegister = Vue.defineComponent({
        this.readCashRecovery();
        this.readPurchaseRecovery();
        this.loginForm={email:'',password:''};
-       await Promise.all([this.loadCatalog(),this.loadStoreSettings()]);
+       await Promise.all([this.loadCatalog(),this.loadStoreSettings(),this.loadStockAlerts()]);
      }catch(err){
        this.loginForm.password='';
        this.authError=err.message;
@@ -333,6 +344,7 @@ const PosRegister = Vue.defineComponent({
      this.returnRequest++;this.drawerRequest++;this.paymentDrawerRequest++;this.cashPending=null;this.cashNotice='';
      this.drawer=null;this.viewedShift=null;this.drawerHistory=null;this.drawerMovements=null;this.closeShift=null;this.returnQuote=null;this.returnRows=[];
      this.cartReady=false;this.cartScope=null;this.purchasePending=null;
+     this.stockAlertsRequest++;this.stockAlerts=null;this.stockAlertsBusy=false;this.stockAlertsError=false;
      this.settingsRequest++;this.storeProfile=defaultStoreSettings();this.settingsForm=null;
      this.settingsBusy=false;this.settingsError=false;this.settingsConflict=false;document.title='Point of Sale · Register';
      this.user=null;this.authState='guest';this.profile=false;this.menu=false;
@@ -349,18 +361,41 @@ const PosRegister = Vue.defineComponent({
      if(!this.user)this.notify('warning','Sign in again to continue.','Session ended');
      return true;
    },
-   async goPage(page){
+   async goPage(page,stockAlerts=false){
      if(this.managementBusy||this.pendingSubmission)return;
-     if(this.editingOrder){if(page!=='register')this.requestEditExit(page);return;}
+     if(this.editingOrder){if(page!=='register')this.requestEditExit(page,stockAlerts);return;}
      this.closeActionDialog(true);
      this.page=page;this.menu=false;this.profile=false;this.viewedOrder=null;this.orderDetailRequest++;this.orderDetailBusy=false;
      this.managementForm=null;this.managementDelete=null;this.managementError='';
      this.resetListing();
+     if(page==='inventory'){
+       if(stockAlerts){this.inventoryLow=true;this.inventoryStatus='active';}
+       await this.refreshInventory(1);return;
+     }
      if(page==='register'){await this.loadCatalog();return;}
      if(page==='settings'){await this.loadStoreSettings(true);return;}
      if(page==='drawer'){this.closeShift=null;this.viewedShift=null;await this.loadDrawer();return;}
      await Promise.all([this.loadListing(1), ...(['products','purchases'].includes(page)?[this.loadProductOptions()]:[]), ...(page==='purchases'?[this.loadPurchaseOptions()]:[])]);
    },
+   async loadStockAlerts(force=false){
+     if(!this.user||(!force&&this.stockAlertsBusy))return;
+     const request=++this.stockAlertsRequest;
+     this.stockAlertsBusy=true;
+     try{
+       const data=await posRequest('/api/pos/inventory/alerts');
+       if(request!==this.stockAlertsRequest)return;
+       if(!Number.isInteger(data.alert_count)||!Number.isInteger(data.out_of_stock_count)||
+           data.out_of_stock_count<0||data.out_of_stock_count>data.alert_count)
+         throw new Error('Stock alert data is unavailable.');
+       this.stockAlerts=data;this.stockAlertsError=false;
+     }catch{
+       // A passive summary should not interrupt checkout or discard a cart.
+       if(request===this.stockAlertsRequest){this.stockAlerts=null;this.stockAlertsError=true;}
+     }finally{if(request===this.stockAlertsRequest)this.stockAlertsBusy=false;}
+   },
+   refreshVisibleStockAlerts(){if(document.visibilityState==='visible')void this.loadStockAlerts();},
+   openStockAlerts(){return this.goPage('inventory',true);},
+   refreshInventory(page=this.listMeta.page){return Promise.all([this.loadListing(page),this.loadStockAlerts(true)]);},
    async loadStoreSettings(forEdit=false){
      const request=++this.settingsRequest;
      if(forEdit){this.settingsBusy=true;this.settingsError=false;this.settingsConflict=false;}
@@ -609,6 +644,7 @@ const PosRegister = Vue.defineComponent({
          document.getElementById('return-dialog')?.close();
          this.notify('success','Refund '+this.refundRef(result.id)+' recorded.','Cash refund recorded');
          this.openRefundReceipt(result,true);
+         void this.loadStockAlerts(true);
          if(this.page==='reports')void this.loadListing();
        }else{
          this.viewedShift=attempt.kind==='close'?result:null;
@@ -802,6 +838,7 @@ const PosRegister = Vue.defineComponent({
        try{sessionStorage.removeItem(key);}catch{}
        if(this.actionDialog==='purchase-form')this.closeActionDialog(true);
        this.notify('success',this.purchaseRef(receipt.id)+' posted. Stock updated.','Purchase received');
+       void this.loadStockAlerts(true);
        if(this.page==='purchases'){
          await this.loadListing(1);
          await this.showPurchase(receipt.id);
@@ -837,7 +874,7 @@ const PosRegister = Vue.defineComponent({
        await posRequest('/api/pos/inventory/'+item.id+(threshold?'/threshold':'/movements'),{method:threshold?'PUT':'POST',body,csrf:this.csrf});
        this.closeActionDialog(true);
        this.notify('success',threshold?'Low-stock threshold saved.':'Stock movement recorded for '+item.name+'.','Inventory updated');
-       await this.loadListing();
+       await this.refreshInventory();
      }catch(err){if(!(await this.expireSession(err)))this.stockError=err.message;}
      finally{this.managementBusy=false;}
    },
@@ -934,7 +971,7 @@ const PosRegister = Vue.defineComponent({
      this.select(this.lines[0]?.id??null);
      this.$nextTick(()=>document.getElementById('sale-order-title')?.focus());
    },
-   requestEditExit(page='orders'){this.editExitPage=page;this.openDialog('discard');},
+   requestEditExit(page='orders',stockAlerts=false){this.editExitPage=page;this.editExitStockAlerts=stockAlerts;this.openDialog('discard');},
    restoreParkedDraft(){
      if(this.parkedDraft)Object.assign(this,this.parkedDraft);
      this.parkedDraft=null;this.editingOrder=null;
@@ -944,7 +981,7 @@ const PosRegister = Vue.defineComponent({
      this.restoreParkedDraft();
      this.closeDialog();
      if(page==='logout')return this.logout();
-     return this.goPage(page);
+     return this.goPage(page,this.editExitStockAlerts);
    },
    saveOrder(finalize=false){
      if(this.pendingSubmission||this.orderSaving||!this.lines.length||(finalize&&!this.canFinalize))return;
@@ -986,6 +1023,7 @@ const PosRegister = Vue.defineComponent({
          await this.goPage('orders');
          if(saved.finalized_at){
            this.openReceipt(saved);
+           void this.loadStockAlerts(true);
            this.notify('success','Order '+this.orderRef(saved)+' paid in cash.','Sale finalized');
          }else{
            this.notify('success','Order '+this.orderRef(saved)+' '+(attempt.edit?'updated.':'saved as a draft.'),attempt.edit?'Draft updated':'Draft saved');
@@ -1108,6 +1146,7 @@ const PosRegister = Vue.defineComponent({
        const record=await posRequest('/api/pos/management/'+resource+(form.id?'/'+form.id:''),{method,body:payload,csrf:this.csrf});
        this.closeActionDialog(true);
        this.notify('success',record.name+(resource==='products'?' · code '+record.internal_code:'')+'.',this.manage.single+(form.id?' updated':' created'));
+       if(resource==='products')void this.loadStockAlerts(true);
        await this.loadListing();
      }catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
      finally{this.managementBusy=false;}
@@ -1121,6 +1160,7 @@ const PosRegister = Vue.defineComponent({
        await posRequest('/api/pos/management/'+resource+'/'+row.id,{method:'DELETE',csrf:this.csrf});
        this.closeActionDialog(true);
        this.notify('success',row.name+'.',this.manage.single+(this.archivable?' archived':' deleted'));
+       if(resource==='products')void this.loadStockAlerts(true);
        await this.loadListing();
      }catch(err){if(!(await this.expireSession(err)))this.managementError=err.message;}
      finally{this.managementBusy=false;}

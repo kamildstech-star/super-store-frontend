@@ -342,3 +342,9 @@ body{margin:0} [v-cloak]{display:none} button{cursor:pointer;font:inherit;color:
 @media screen{
  .receipt-dialog .receipt-paper{margin-block:12px}
 }
+
+/* Keep stock alerts alongside the register controls without shifting the menu. */
+.stock-alert-button{position:relative}
+.stock-alert-button.stock-alert-active>.remix-icon{color:#824b00}
+.stock-alert-count{position:absolute;top:3px;right:0;min-width:17px;height:17px;padding:0 3px;border-radius:9px;background:#754400;color:white;font-size:10px;font-weight:800;line-height:17px;text-align:center;font-variant-numeric:tabular-nums}
+.stock-alert-count.stock-alert-empty{background:#ad2443}
